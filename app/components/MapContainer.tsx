@@ -6,7 +6,7 @@ interface MapContainerProps {
   mapStyle?: MapStyleType;
 }
 
-export function MapContainer({ mapStyle = "dark" }: MapContainerProps) {
+export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
 

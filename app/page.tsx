@@ -8,7 +8,7 @@ import { type MapStyleType } from "@/app/lib/mapStyles";
 
 export default function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [mapStyle, setMapStyle] = useState<MapStyleType>("dark");
+  const [mapStyle, setMapStyle] = useState<MapStyleType>("streets");
 
   return (
     <div className="relative h-screen w-screen overflow-hidden">
