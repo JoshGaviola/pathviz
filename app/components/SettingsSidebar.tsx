@@ -1,9 +1,18 @@
+import { type MapStyleType } from "@/app/lib/mapStyles";
+
 interface SettingsSidebarProps {
   isOpen: boolean;
   onClose: () => void;
+  mapStyle?: MapStyleType;
+  onMapStyleChange?: (style: MapStyleType) => void;
 }
 
-export function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProps) {
+export function SettingsSidebar({
+  isOpen,
+  onClose,
+  mapStyle = "dark",
+  onMapStyleChange,
+}: SettingsSidebarProps) {
   return (
     <>
       {/* Sidebar overlay - slides in from right */}
@@ -39,6 +48,24 @@ export function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProps) {
 
           {/* Sidebar content */}
           <div className="flex-1 space-y-6 px-6 py-4">
+            {/* Map style section */}
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Map Style
+              </label>
+              <select
+                className="mt-2 w-full rounded bg-slate-800 px-3 py-2 text-sm text-white ring-1 ring-slate-700 transition hover:ring-slate-600"
+                value={mapStyle}
+                onChange={(event) =>
+                  onMapStyleChange?.(event.target.value as MapStyleType)
+                }
+              >
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+                <option value="streets">Streets</option>
+              </select>
+            </div>
+
             {/* Algorithm section */}
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">

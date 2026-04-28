@@ -1,8 +1,12 @@
 import maplibregl from "maplibre-gl";
 import { useEffect, useRef } from "react";
-import { darkMapStyle } from "@/app/lib/mapStyles";
+import { getMapStyle, type MapStyleType } from "@/app/lib/mapStyles";
 
-export function MapContainer() {
+interface MapContainerProps {
+  mapStyle?: MapStyleType;
+}
+
+export function MapContainer({ mapStyle = "dark" }: MapContainerProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
 
@@ -13,7 +17,7 @@ export function MapContainer() {
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: darkMapStyle,
+      style: getMapStyle(mapStyle),
       center: [0, 20],
       zoom: 1.6,
       minZoom: 1,
@@ -32,6 +36,12 @@ export function MapContainer() {
       mapRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (mapRef.current) {
+      mapRef.current.setStyle(getMapStyle(mapStyle));
+    }
+  }, [mapStyle]);
 
   return <div ref={mapContainerRef} className="h-full w-full" />;
 }
