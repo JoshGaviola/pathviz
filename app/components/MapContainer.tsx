@@ -30,8 +30,14 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
       "top-right"
     );
     
+    const marker = new maplibregl.Marker()
+
     mapRef.current = map;
     setMapInstance(map)
+
+    map.on("click", (e) => {
+      marker.setLngLat(e.lngLat).addTo(map);
+    });
     
 
     return () => {
