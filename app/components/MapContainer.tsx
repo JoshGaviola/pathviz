@@ -1,6 +1,7 @@
 import maplibregl from "maplibre-gl";
 import { useEffect, useRef } from "react";
 import { getMapStyle, type MapStyleType } from "@/app/lib/mapStyles";
+import { setMapInstance } from "../lib/mapStore";
 
 interface MapContainerProps {
   mapStyle?: MapStyleType;
@@ -10,7 +11,7 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
 
-  useEffect(() => {
+  useEffect(() =>   {
     if (!mapContainerRef.current || mapRef.current) {
       return;
     }
@@ -28,8 +29,10 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
       new maplibregl.NavigationControl({ visualizePitch: false }),
       "top-right"
     );
-
+    
     mapRef.current = map;
+    setMapInstance(map)
+    
 
     return () => {
       map.remove();
@@ -43,5 +46,5 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
     }
   }, [mapStyle]);
 
-  return <div ref={mapContainerRef} className="h-full w-full" />;
+  return  <div ref={mapContainerRef} className="h-full w-full" />;
 }
