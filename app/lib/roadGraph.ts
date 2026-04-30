@@ -109,7 +109,7 @@ function createOverpassRoadQuery(bounds: BoundingBox): string {
   return `
 [out:json][timeout:25];
 (
-  way["highway"]["highway"!="footway"]["highway"!="path"]["highway"!="cycleway"]["highway"!="steps"](${bounds.south},${bounds.west},${bounds.north},${bounds.east});
+  way["highway"~"motorway|primary|secondary|tertiary"](${bounds.south},${bounds.west},${bounds.north},${bounds.east});
 );
 (._;>;);
 out body;
@@ -320,6 +320,7 @@ export function roadGraphToEdgeFeatureCollection(
   for (const edge of graph.edges) {
     const fromNode = graph.nodes[edge.from];
     const toNode = graph.nodes[edge.to];
+
 
     if (!fromNode || !toNode) {
       continue;

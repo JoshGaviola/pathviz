@@ -18,7 +18,7 @@ const ROAD_NODE_SOURCE_ID = "road-node-source";
 const ROAD_EDGE_SOURCE_ID = "road-edge-source";
 const ROAD_NODE_LAYER_ID = "road-node-layer";
 const ROAD_EDGE_LAYER_ID = "road-edge-layer";
-const MIN_GRAPH_ZOOM = 10;
+const MIN_GRAPH_ZOOM = 12;
 const REQUEST_DEBOUNCE_MS = 900;
 
 function getGeoJsonSource(
