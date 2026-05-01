@@ -349,12 +349,26 @@ export function roadGraphToEdgeFeatureCollection(
   };
 }
 
-export function findNearestRoadNode(graph: RoadGraph, lng: number, lat: number): RoadNode | null {
+export function findNearestRoadNode(
+  graph: RoadGraph,
+  lng: number,
+  lat: number
+): RoadNode | null {
+  if (!graph?.nodes) return null;
+
   let nearestNode: RoadNode | null = null;
-  let nearestDistance = Number.POSITIVE_INFINITY;
+  let nearestDistance = Infinity;
 
   for (const node of Object.values(graph.nodes)) {
-    const distance = getDistanceMeters([lng, lat], [node.lng, node.lat]);
+    if (!node || typeof node.lng !== "number" || typeof node.lat !== "number") {
+      continue;
+    }
+
+    const distance = getDistanceMeters(
+      [lng, lat],
+      [node.lng, node.lat]
+    );
+
     if (distance < nearestDistance) {
       nearestDistance = distance;
       nearestNode = node;

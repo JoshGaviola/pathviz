@@ -103,6 +103,13 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
   const pendingSnapRef = useRef<maplibregl.LngLat | null>(null);
   const debounceTimerRef = useRef<number | null>(null);
   const lastRequestKeyRef = useRef<string | null>(null);
+  const markerARef = useRef<maplibregl.Marker | null>(null);
+  const markerBRef = useRef<maplibregl.Marker | null>(null);
+  const pointARef = useRef<maplibregl.LngLat | null>(null);
+  const pointBRef = useRef<maplibregl.LngLat | null>(null);
+  const isLoadingRef = useRef(false);
+
+  let isActive = null;
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
@@ -122,7 +129,6 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
       new maplibregl.NavigationControl({ visualizePitch: false }),
       "top-right"
     );
-    const marker = new maplibregl.Marker({ color: "#f59e0b" });
 
     mapRef.current = map;
     setMapInstance(map);
@@ -130,27 +136,55 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
     const snapMarkerToNearestNode = (lngLat: maplibregl.LngLatLike, graph: RoadGraph) => {
       const clicked = maplibregl.LngLat.convert(lngLat);
       const nearestNode = findNearestRoadNode(graph, clicked.lng, clicked.lat);
+      
 
-      if (!nearestNode) {
-        return;
+      if(!nearestNode) return;
+
+      if(!markerARef.current) {
+        markerARef.current = new maplibregl.Marker({ color: "#f50b0b" })
+          .setLngLat([nearestNode.lng, nearestNode.lat])
+          .addTo(map);
+        pointARef.current = new maplibregl.LngLat(nearestNode.lng, nearestNode.lat);
+      }else{
+        markerBRef.current?.remove();
+        markerBRef.current = new maplibregl.Marker({ color: "#0b8df5" })
+          .setLngLat([nearestNode.lng, nearestNode.lat])
+          .addTo(map);
+        pointBRef.current = new maplibregl.LngLat(nearestNode.lng, nearestNode.lat);
       }
 
-      marker.setLngLat([nearestNode.lng, nearestNode.lat]).addTo(map);
-    };
+      /*
+        markerARef.current.getElement().addEventListener("contextmenu", (e) => {
+           e.preventDefault();
+           isActive = true;
 
+           if(isActive) {{
+
+           }
+       });
+        markerBRef.current?.getElement().addEventListener("contextmenu", (e) => {
+           e.preventDefault();
+          alert("Marker B: " + pointBRef.current?.toString());
+       });
+       */
+
+      // marker.setLngLat([nearestNode.lng, nearestNode.lat]).addTo(map);
+    };      
     const loadRoadGraph = async () => {
-      if (!map.isStyleLoaded()) {
-        return;
-      }
+      if (!map.isStyleLoaded()) return;
 
-      if (map.getZoom() < MIN_GRAPH_ZOOM) {
+        if (map.getZoom() < MIN_GRAPH_ZOOM) {
         roadGraphRef.current = null;
         clearRoadGraph(map);
         setRoadGraphLayerVisibility(map, false);
         return;
       }
 
+      if (isLoadingRef.current) return;
+      isLoadingRef.current = true;
+
       const bounds = map.getBounds();
+
       const requestKey = [
         Math.floor(map.getZoom()),
         bounds.getWest().toFixed(2),
@@ -161,10 +195,13 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
 
       if (requestKey === lastRequestKeyRef.current && roadGraphRef.current) {
         setRoadGraphLayerVisibility(map, true);
+
         if (pendingSnapRef.current) {
           snapMarkerToNearestNode(pendingSnapRef.current, roadGraphRef.current);
           pendingSnapRef.current = null;
         }
+
+        isLoadingRef.current = false;
         return;
       }
 
@@ -190,19 +227,30 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
 
           roadGraphRef.current = graph;
 
-          getGeoJsonSource(map, ROAD_EDGE_SOURCE_ID)?.setData(roadGraphToEdgeFeatureCollection(graph));
-          getGeoJsonSource(map, ROAD_NODE_SOURCE_ID)?.setData(roadGraphToNodeFeatureCollection(graph));
+          getGeoJsonSource(map, ROAD_EDGE_SOURCE_ID)?.setData(
+            roadGraphToEdgeFeatureCollection(graph)
+          );
+
+          getGeoJsonSource(map, ROAD_NODE_SOURCE_ID)?.setData(
+            roadGraphToNodeFeatureCollection(graph)
+          );
+
           setRoadGraphLayerVisibility(map, true);
 
           if (pendingSnapRef.current) {
             snapMarkerToNearestNode(pendingSnapRef.current, graph);
             pendingSnapRef.current = null;
           }
+
         } catch (error) {
           console.error("Failed to load road graph", error);
+
           roadGraphRef.current = null;
           clearRoadGraph(map);
           setRoadGraphLayerVisibility(map, false);
+
+        } finally {
+          isLoadingRef.current = false;
         }
       }, REQUEST_DEBOUNCE_MS);
     };
@@ -227,6 +275,11 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
       ensureRoadGraphLayers(map);
       void loadRoadGraph();
     });
+    map.on('styleimagemissing', (e) => {
+      if (!e.id || e.id.startsWith('road') || e.id === '') return;
+
+      console.warn('Missing image:', e.id);
+    });
     map.on("moveend", () => void loadRoadGraph());
     map.on("styledata", () => {
       if (map.isStyleLoaded()) {
@@ -247,10 +300,12 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
   }, []);
 
   useEffect(() => {
+    console.log("mounth");
+
     if (mapRef.current) {
       mapRef.current.setStyle(getMapStyle(mapStyle));
     }
   }, [mapStyle]);
 
-  return  <div ref={mapContainerRef} className="h-full w-full" />;
+  return <div ref={mapContainerRef} className="h-full w-full" />;
 }
