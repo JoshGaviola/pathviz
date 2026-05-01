@@ -1,5 +1,5 @@
 import maplibregl from "maplibre-gl";
-import { useEffect, useRef } from "react";
+import { act, useEffect, useRef } from "react";
 import { getMapStyle, type MapStyleType } from "@/app/lib/mapStyles";
 import { setMapInstance } from "../lib/mapStore";
 import {
@@ -107,9 +107,9 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
   const markerBRef = useRef<maplibregl.Marker | null>(null);
   const pointARef = useRef<maplibregl.LngLat | null>(null);
   const pointBRef = useRef<maplibregl.LngLat | null>(null);
+  const activeMarkerRef = useRef<maplibregl.Marker | null>(null);
   const isLoadingRef = useRef(false);
 
-  let isActive = null;
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
@@ -136,7 +136,6 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
     const snapMarkerToNearestNode = (lngLat: maplibregl.LngLatLike, graph: RoadGraph) => {
       const clicked = maplibregl.LngLat.convert(lngLat);
       const nearestNode = findNearestRoadNode(graph, clicked.lng, clicked.lat);
-      
 
       if(!nearestNode) return;
 
@@ -145,30 +144,36 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
           .setLngLat([nearestNode.lng, nearestNode.lat])
           .addTo(map);
         pointARef.current = new maplibregl.LngLat(nearestNode.lng, nearestNode.lat);
-      }else{
-        markerBRef.current?.remove();
+
+      }else if(!markerBRef.current) {
         markerBRef.current = new maplibregl.Marker({ color: "#0b8df5" })
           .setLngLat([nearestNode.lng, nearestNode.lat])
           .addTo(map);
         pointBRef.current = new maplibregl.LngLat(nearestNode.lng, nearestNode.lat);
       }
 
-      /*
+      // right click para mo pili ug marker na e move.
         markerARef.current.getElement().addEventListener("contextmenu", (e) => {
            e.preventDefault();
-           isActive = true;
-
-           if(isActive) {{
-
-           }
+          if(activeMarkerRef.current === markerARef.current) {
+              console.log("Marker A is now active");
+          } else {
+            activeMarkerRef.current = markerARef.current;
+          }
        });
+
         markerBRef.current?.getElement().addEventListener("contextmenu", (e) => {
            e.preventDefault();
-          alert("Marker B: " + pointBRef.current?.toString());
+          if(activeMarkerRef.current === markerBRef.current) {
+            console.log("Marker B is now active");
+          } else {
+            activeMarkerRef.current = markerBRef.current;
+          }
        });
-       */
 
-      // marker.setLngLat([nearestNode.lng, nearestNode.lat]).addTo(map);
+       activeMarkerRef.current?.setLngLat([nearestNode.lng, nearestNode.lat]).addTo(map);
+
+       
     };      
     const loadRoadGraph = async () => {
       if (!map.isStyleLoaded()) return;
@@ -300,8 +305,6 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
   }, []);
 
   useEffect(() => {
-    console.log("mounth");
-
     if (mapRef.current) {
       mapRef.current.setStyle(getMapStyle(mapStyle));
     }
