@@ -1,4 +1,4 @@
-import maplibregl from "maplibre-gl";
+import maplibregl, { Point } from "maplibre-gl";
 import { act, useEffect, useRef } from "react";
 import { getMapStyle, type MapStyleType } from "@/app/lib/mapStyles";
 import { setMapInstance } from "../lib/mapStore";
@@ -110,8 +110,7 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
   const activeMarkerRef = useRef<maplibregl.Marker | null>(null);
   const isLoadingRef = useRef(false);
 
-
-  useEffect(() => {
+  useEffect(() =>  {
     if (!mapContainerRef.current || mapRef.current) {
       return;
     }
@@ -152,6 +151,8 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
         pointBRef.current = new maplibregl.LngLat(nearestNode.lng, nearestNode.lat);
       }
 
+     
+
       // right click para mo pili ug marker na e move.
         markerARef.current.getElement().addEventListener("contextmenu", (e) => {
            e.preventDefault();
@@ -172,6 +173,14 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
        });
 
        activeMarkerRef.current?.setLngLat([nearestNode.lng, nearestNode.lat]).addTo(map);
+        if(activeMarkerRef.current === markerARef.current) {
+          pointARef.current = new maplibregl.LngLat(nearestNode.lng, nearestNode.lat);
+        } else if(activeMarkerRef.current === markerBRef.current) {
+          pointBRef.current = new maplibregl.LngLat(nearestNode.lng, nearestNode.lat);
+        }
+
+        //console.log("PointA:", pointARef.current);
+        //console.log("PointB:", pointBRef.current);
 
        
     };      
