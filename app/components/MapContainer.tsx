@@ -110,7 +110,7 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
   const activeMarkerRef = useRef<maplibregl.Marker | null>(null);
   const isLoadingRef = useRef(false);
 
-  useEffect(() =>  {
+  useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
       return;
     }
@@ -136,58 +136,82 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
       const clicked = maplibregl.LngLat.convert(lngLat);
       const nearestNode = findNearestRoadNode(graph, clicked.lng, clicked.lat);
 
-      if(!nearestNode) return;
+      if (!nearestNode) return;
 
-      if(!markerARef.current) {
+      if (!markerARef.current) {
         markerARef.current = new maplibregl.Marker({ color: "#f50b0b" })
           .setLngLat([nearestNode.lng, nearestNode.lat])
           .addTo(map);
         pointARef.current = new maplibregl.LngLat(nearestNode.lng, nearestNode.lat);
 
-      }else if(!markerBRef.current) {
+      } else if (!markerBRef.current) {
         markerBRef.current = new maplibregl.Marker({ color: "#0b8df5" })
           .setLngLat([nearestNode.lng, nearestNode.lat])
           .addTo(map);
         pointBRef.current = new maplibregl.LngLat(nearestNode.lng, nearestNode.lat);
       }
 
+      // right click para mo pili ug marker na e move.
+      markerARef.current.getElement().addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        if (activeMarkerRef.current === markerARef.current) {
+          console.log("Marker A is now active");
+        } else {
+          activeMarkerRef.current = markerARef.current;
+        }
+      });
+
+      markerBRef.current?.getElement().addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        if (activeMarkerRef.current === markerBRef.current) {
+          console.log("Marker B is now active");
+        } else {
+          activeMarkerRef.current = markerBRef.current;
+        }
+      });
+
+      activeMarkerRef.current?.setLngLat([nearestNode.lng, nearestNode.lat]).addTo(map);
+      if (activeMarkerRef.current === markerARef.current) {
+        pointARef.current = new maplibregl.LngLat(nearestNode.lng, nearestNode.lat);
+      } else if (activeMarkerRef.current === markerBRef.current) {
+        pointBRef.current = new maplibregl.LngLat(nearestNode.lng, nearestNode.lat);
+      }
+
+      if (pointARef.current && pointBRef.current) {
+        const distance = calculateDistance(pointARef.current, pointBRef.current)
+        console.log("Distance: ", distance)
+      }
      
 
-      // right click para mo pili ug marker na e move.
-        markerARef.current.getElement().addEventListener("contextmenu", (e) => {
-           e.preventDefault();
-          if(activeMarkerRef.current === markerARef.current) {
-              console.log("Marker A is now active");
-          } else {
-            activeMarkerRef.current = markerARef.current;
-          }
-       });
+    };
 
-        markerBRef.current?.getElement().addEventListener("contextmenu", (e) => {
-           e.preventDefault();
-          if(activeMarkerRef.current === markerBRef.current) {
-            console.log("Marker B is now active");
-          } else {
-            activeMarkerRef.current = markerBRef.current;
-          }
-       });
+    const calculateDistance = (pointA: maplibregl.LngLat, pointB: maplibregl.LngLat) => {
+      const R = 6371000; 
 
-       activeMarkerRef.current?.setLngLat([nearestNode.lng, nearestNode.lat]).addTo(map);
-        if(activeMarkerRef.current === markerARef.current) {
-          pointARef.current = new maplibregl.LngLat(nearestNode.lng, nearestNode.lat);
-        } else if(activeMarkerRef.current === markerBRef.current) {
-          pointBRef.current = new maplibregl.LngLat(nearestNode.lng, nearestNode.lat);
-        }
+      const lat1 = (pointA.lat * Math.PI) / 180;
+      const lat2 = (pointB.lat * Math.PI) / 180;
 
-        //console.log("PointA:", pointARef.current);
-        //console.log("PointB:", pointBRef.current);
+      const deltaLat = ((pointB.lat - pointA.lat) * Math.PI) / 180;
+      const deltaLng = ((pointB.lng - pointA.lng) * Math.PI) / 180;
 
-       
-    };      
+      const a =
+        Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+        Math.cos(lat1) *
+        Math.cos(lat2) *
+        Math.sin(deltaLng / 2) *
+        Math.sin(deltaLng / 2);
+
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+      const distance = R * c;
+
+      return distance; 
+    };
+    
     const loadRoadGraph = async () => {
       if (!map.isStyleLoaded()) return;
 
-        if (map.getZoom() < MIN_GRAPH_ZOOM) {
+      if (map.getZoom() < MIN_GRAPH_ZOOM) {
         roadGraphRef.current = null;
         clearRoadGraph(map);
         setRoadGraphLayerVisibility(map, false);
