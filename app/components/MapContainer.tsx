@@ -168,6 +168,18 @@ function setStartMarker(
   markerRef.current.setLngLat(lngLat).addTo(map);
 }
 
+function setEndMarker(
+  map: maplibregl.Map,
+  markerRef: React.MutableRefObject<maplibregl.Marker | null>,
+  lngLat: [number, number]
+) {
+  if (!markerRef.current) {
+    markerRef.current = new maplibregl.Marker({ color: "#3b82f6" });
+  }
+
+  markerRef.current.setLngLat(lngLat).addTo(map);
+}
+
 function setRoadGraphData(map: maplibregl.Map, graph: RoadGraph) {
   getGeoJsonSource(map, ROAD_EDGE_SOURCE_ID)?.setData(roadGraphToEdgeFeatureCollection(graph));
   getGeoJsonSource(map, ROAD_NODE_SOURCE_ID)?.setData(roadGraphToNodeFeatureCollection(graph));
@@ -182,9 +194,12 @@ export function MapContainer({
   const initialMapStyleRef = useRef(mapStyle);
   const roadGraphRef = useRef<RoadGraph | null>(null);
   const startMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const endMarkerRef = useRef<maplibregl.Marker | null>(null);
   const selectionCircleRef = useRef<[number, number][] | null>(null);
   const clickAbortControllerRef = useRef<AbortController | null>(null);
+  const endAbortControllerRef = useRef<AbortController | null>(null);
   const lastClickPointRef = useRef<[number, number] | null>(null);
+  const lastEndPointRef = useRef<[number, number] | null>(null);
   const effectiveRadiusKm = selectionRadiusKm ?? SELECTION_RADIUS_KM;
   const radiusKmRef = useRef(effectiveRadiusKm);
 
@@ -266,6 +281,49 @@ export function MapContainer({
     ]
   );
 
+  const applyEndPoint = useCallback(
+    async (center: [number, number], radiusKm: number) => {
+      const map = mapRef.current;
+      if (!map) {
+        return;
+      }
+
+      endAbortControllerRef.current?.abort();
+      const abortController = new AbortController();
+      endAbortControllerRef.current = abortController;
+
+      try {
+        const nearestNode = await getNearestNode(
+          center[1],
+          center[0],
+          radiusKm,
+          abortController.signal
+        );
+
+        if (abortController.signal.aborted) {
+          return;
+        }
+
+        if (!nearestNode) {
+          endMarkerRef.current?.remove();
+          endMarkerRef.current = null;
+          return;
+        }
+
+        setEndMarker(map, endMarkerRef, center);
+      } catch (error) {
+        if (!abortController.signal.aborted) {
+          console.error("Failed to resolve the nearest end node", error);
+        }
+      } finally {
+        if (endAbortControllerRef.current === abortController) {
+          endAbortControllerRef.current = null;
+        }
+      }
+    },
+    [getNearestNode, setEndMarker]
+  );
+
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
       return;
@@ -312,6 +370,17 @@ export function MapContainer({
       await applySelectionAtPoint(clickPoint, radiusKmRef.current);
     };
 
+    const handleMapRightClick = async (event: maplibregl.MapMouseEvent) => {
+      event.preventDefault?.();
+      if (event.originalEvent instanceof MouseEvent) {
+        event.originalEvent.preventDefault();
+      }
+
+      const clickPoint: [number, number] = [event.lngLat.lng, event.lngLat.lat];
+      lastEndPointRef.current = clickPoint;
+      await applyEndPoint(clickPoint, radiusKmRef.current);
+    };
+
     const handleLoad = () => {
       syncOverlayState();
     };
@@ -323,16 +392,21 @@ export function MapContainer({
     };
 
     map.on("click", handleMapClick);
+    map.on("contextmenu", handleMapRightClick);
     map.on("load", handleLoad);
     map.on("styledata", handleStyleData);
 
     return () => {
       clickAbortControllerRef.current?.abort();
+      endAbortControllerRef.current?.abort();
       map.off("click", handleMapClick);
+      map.off("contextmenu", handleMapRightClick);
       map.off("load", handleLoad);
       map.off("styledata", handleStyleData);
       startMarkerRef.current?.remove();
       startMarkerRef.current = null;
+      endMarkerRef.current?.remove();
+      endMarkerRef.current = null;
       map.remove();
       mapRef.current = null;
     };
@@ -344,7 +418,11 @@ export function MapContainer({
     if (lastClickPointRef.current) {
       applySelectionAtPoint(lastClickPointRef.current, effectiveRadiusKm);
     }
-  }, [applySelectionAtPoint, effectiveRadiusKm]);
+
+    if (lastEndPointRef.current) {
+      applyEndPoint(lastEndPointRef.current, effectiveRadiusKm);
+    }
+  }, [applyEndPoint, applySelectionAtPoint, effectiveRadiusKm]);
 
   useEffect(() => {
     if (mapRef.current) {
