@@ -233,7 +233,7 @@ export function fetchOverpassData(
 export async function getNearestNode(
   latitude: number,
   longitude: number,
-  radiusKm = 0.15,
+  radiusKm = 2,
   signal?: AbortSignal
 ): Promise<OverpassNode | null> {
   const circle = createGeoJSONCircle([longitude, latitude], radiusKm);

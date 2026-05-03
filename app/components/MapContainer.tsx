@@ -25,7 +25,7 @@ const ROAD_EDGE_LAYER_ID = "road-edge-layer";
 const SELECTION_RADIUS_SOURCE_ID = "selection-radius-source";
 const SELECTION_RADIUS_FILL_LAYER_ID = "selection-radius-fill-layer";
 const SELECTION_RADIUS_LINE_LAYER_ID = "selection-radius-line-layer";
-const SELECTION_RADIUS_KM = 0.15;
+const SELECTION_RADIUS_KM = 2;
 
 function getGeoJsonSource(
   map: maplibregl.Map,

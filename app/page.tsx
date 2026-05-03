@@ -9,7 +9,7 @@ import { type MapStyleType } from "@/app/lib/mapStyles";
 export default function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mapStyle, setMapStyle] = useState<MapStyleType>("streets");
-  const [selectionRadiusKm, setSelectionRadiusKm] = useState(0.15);
+  const [selectionRadiusKm, setSelectionRadiusKm] = useState(2);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden">

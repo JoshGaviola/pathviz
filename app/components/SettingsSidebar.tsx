@@ -14,7 +14,7 @@ export function SettingsSidebar({
   onClose,
   mapStyle = "dark",
   onMapStyleChange,
-  radiusKm = 0.15,
+  radiusKm = 2,
   onRadiusChange,
 }: SettingsSidebarProps) {
   return (
@@ -107,17 +107,17 @@ export function SettingsSidebar({
               </label>
               <input
                 type="range"
-                min="0.05"
-                max="1"
-                step="0.05"
+                min="2"
+                max="20"
+                step="1"
                 value={radiusKm}
                 onChange={(event) => onRadiusChange?.(Number(event.target.value))}
                 className="mt-2 w-full"
               />
               <div className="mt-2 flex justify-between text-xs text-slate-400">
-                <span>0.05 km</span>
-                <span>{radiusKm.toFixed(2)} km</span>
-                <span>1 km</span>
+                <span>2 km</span>
+                <span>{radiusKm.toFixed(0)} km</span>
+                <span>20 km</span>
               </div>
             </div>
 
