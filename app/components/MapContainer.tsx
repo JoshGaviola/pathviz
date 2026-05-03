@@ -1,10 +1,13 @@
-import maplibregl, { Point } from "maplibre-gl";
-import { act, useEffect, useRef } from "react";
+import maplibregl from "maplibre-gl";
+import { useCallback, useEffect, useRef } from "react";
 import { getMapStyle, type MapStyleType } from "@/app/lib/mapStyles";
 import { setMapInstance } from "../lib/mapStore";
 import {
-  fetchRoadGraphForBounds,
-  findNearestRoadNode,
+  createGeoJSONCircle,
+  getBoundingBoxFromPolygon,
+  getMapGraph,
+  getNearestNode,
+  filterRoadGraphToRadius,
   roadGraphToEdgeFeatureCollection,
   roadGraphToNodeFeatureCollection,
   type RoadGraph,
@@ -12,14 +15,17 @@ import {
 
 interface MapContainerProps {
   mapStyle?: MapStyleType;
+  selectionRadiusKm?: number;
 }
 
 const ROAD_NODE_SOURCE_ID = "road-node-source";
 const ROAD_EDGE_SOURCE_ID = "road-edge-source";
 const ROAD_NODE_LAYER_ID = "road-node-layer";
 const ROAD_EDGE_LAYER_ID = "road-edge-layer";
-const MIN_GRAPH_ZOOM = 12;
-const REQUEST_DEBOUNCE_MS = 900;
+const SELECTION_RADIUS_SOURCE_ID = "selection-radius-source";
+const SELECTION_RADIUS_FILL_LAYER_ID = "selection-radius-fill-layer";
+const SELECTION_RADIUS_LINE_LAYER_ID = "selection-radius-line-layer";
+const SELECTION_RADIUS_KM = 0.15;
 
 function getGeoJsonSource(
   map: maplibregl.Map,
@@ -69,10 +75,42 @@ function ensureRoadGraphLayers(map: maplibregl.Map) {
       source: ROAD_NODE_SOURCE_ID,
       paint: {
         "circle-color": "#f59e0b",
-        "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 3.2, 14, 5.8, 18, 8.2],
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 1.5, 10, 3.2, 14, 5.8, 18, 8.2],
         "circle-stroke-color": "#ffffff",
-        "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 10, 0.8, 16, 2],
+        "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 1, 0.4, 10, 0.8, 16, 2],
         "circle-opacity": 1,
+      },
+    });
+  }
+
+  if (!map.getSource(SELECTION_RADIUS_SOURCE_ID)) {
+    map.addSource(SELECTION_RADIUS_SOURCE_ID, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+  }
+
+  if (!map.getLayer(SELECTION_RADIUS_FILL_LAYER_ID)) {
+    map.addLayer({
+      id: SELECTION_RADIUS_FILL_LAYER_ID,
+      type: "fill",
+      source: SELECTION_RADIUS_SOURCE_ID,
+      paint: {
+        "fill-color": "#ef4444",
+        "fill-opacity": 0.12,
+      },
+    });
+  }
+
+  if (!map.getLayer(SELECTION_RADIUS_LINE_LAYER_ID)) {
+    map.addLayer({
+      id: SELECTION_RADIUS_LINE_LAYER_ID,
+      type: "line",
+      source: SELECTION_RADIUS_SOURCE_ID,
+      paint: {
+        "line-color": "#ef4444",
+        "line-width": 2,
+        "line-opacity": 0.75,
       },
     });
   }
@@ -95,20 +133,138 @@ function clearRoadGraph(map: maplibregl.Map) {
   getGeoJsonSource(map, ROAD_NODE_SOURCE_ID)?.setData({ type: "FeatureCollection", features: [] });
 }
 
-export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
+function clearSelectionRadius(map: maplibregl.Map) {
+  getGeoJsonSource(map, SELECTION_RADIUS_SOURCE_ID)?.setData({
+    type: "FeatureCollection",
+    features: [],
+  });
+}
+
+function setSelectionRadius(map: maplibregl.Map, circle: [number, number][]) {
+  getGeoJsonSource(map, SELECTION_RADIUS_SOURCE_ID)?.setData({
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        properties: {},
+        geometry: {
+          type: "Polygon",
+          coordinates: [circle],
+        },
+      },
+    ],
+  });
+}
+
+function setStartMarker(
+  map: maplibregl.Map,
+  markerRef: React.MutableRefObject<maplibregl.Marker | null>,
+  lngLat: [number, number]
+) {
+  if (!markerRef.current) {
+    markerRef.current = new maplibregl.Marker({ color: "#ef4444" });
+  }
+
+  markerRef.current.setLngLat(lngLat).addTo(map);
+}
+
+function setRoadGraphData(map: maplibregl.Map, graph: RoadGraph) {
+  getGeoJsonSource(map, ROAD_EDGE_SOURCE_ID)?.setData(roadGraphToEdgeFeatureCollection(graph));
+  getGeoJsonSource(map, ROAD_NODE_SOURCE_ID)?.setData(roadGraphToNodeFeatureCollection(graph));
+}
+
+export function MapContainer({
+  mapStyle = "streets",
+  selectionRadiusKm,
+}: MapContainerProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const initialMapStyleRef = useRef(mapStyle);
   const roadGraphRef = useRef<RoadGraph | null>(null);
-  const pendingSnapRef = useRef<maplibregl.LngLat | null>(null);
-  const debounceTimerRef = useRef<number | null>(null);
-  const lastRequestKeyRef = useRef<string | null>(null);
-  const markerARef = useRef<maplibregl.Marker | null>(null);
-  const markerBRef = useRef<maplibregl.Marker | null>(null);
-  const pointARef = useRef<maplibregl.LngLat | null>(null);
-  const pointBRef = useRef<maplibregl.LngLat | null>(null);
-  const activeMarkerRef = useRef<maplibregl.Marker | null>(null);
-  const isLoadingRef = useRef(false);
+  const startMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const selectionCircleRef = useRef<[number, number][] | null>(null);
+  const clickAbortControllerRef = useRef<AbortController | null>(null);
+  const lastClickPointRef = useRef<[number, number] | null>(null);
+  const effectiveRadiusKm = selectionRadiusKm ?? SELECTION_RADIUS_KM;
+  const radiusKmRef = useRef(effectiveRadiusKm);
+
+  const applySelectionAtPoint = useCallback(
+    async (center: [number, number], radiusKm: number) => {
+      const map = mapRef.current;
+      if (!map) {
+        return;
+      }
+
+      clickAbortControllerRef.current?.abort();
+      const abortController = new AbortController();
+      clickAbortControllerRef.current = abortController;
+
+      try {
+        const nearestNode = await getNearestNode(
+          center[1],
+          center[0],
+          radiusKm,
+          abortController.signal
+        );
+
+        if (abortController.signal.aborted) {
+          return;
+        }
+
+        if (!nearestNode) {
+          startMarkerRef.current?.remove();
+          startMarkerRef.current = null;
+          selectionCircleRef.current = null;
+          clearSelectionRadius(map);
+          roadGraphRef.current = null;
+          clearRoadGraph(map);
+          setRoadGraphLayerVisibility(map, false);
+          return;
+        }
+
+        setStartMarker(map, startMarkerRef, center);
+
+        const circle = createGeoJSONCircle(center, radiusKm);
+        selectionCircleRef.current = circle;
+        setSelectionRadius(map, circle);
+
+        const graph = await getMapGraph(
+          getBoundingBoxFromPolygon(circle),
+          abortController.signal
+        );
+
+        if (abortController.signal.aborted) {
+          return;
+        }
+
+        const filteredGraph = filterRoadGraphToRadius(graph, center, radiusKm);
+        roadGraphRef.current = filteredGraph;
+        setRoadGraphData(map, filteredGraph);
+        setRoadGraphLayerVisibility(map, true);
+      } catch (error) {
+        if (!abortController.signal.aborted) {
+          console.error("Failed to resolve the nearest road node", error);
+        }
+      } finally {
+        if (clickAbortControllerRef.current === abortController) {
+          clickAbortControllerRef.current = null;
+        }
+      }
+    },
+    [
+      clearRoadGraph,
+      clearSelectionRadius,
+      createGeoJSONCircle,
+      filterRoadGraphToRadius,
+      getBoundingBoxFromPolygon,
+      getMapGraph,
+      getNearestNode,
+      setRoadGraphData,
+      setRoadGraphLayerVisibility,
+      setSelectionRadius,
+      setStartMarker,
+    ]
+  );
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
@@ -132,210 +288,63 @@ export function MapContainer({ mapStyle = "streets" }: MapContainerProps) {
     mapRef.current = map;
     setMapInstance(map);
 
-    const snapMarkerToNearestNode = (lngLat: maplibregl.LngLatLike, graph: RoadGraph) => {
-      const clicked = maplibregl.LngLat.convert(lngLat);
-      const nearestNode = findNearestRoadNode(graph, clicked.lng, clicked.lat);
+    const syncOverlayState = () => {
+      ensureRoadGraphLayers(map);
 
-      if (!nearestNode) return;
-
-      if (!markerARef.current) {
-        markerARef.current = new maplibregl.Marker({ color: "#f50b0b" })
-          .setLngLat([nearestNode.lng, nearestNode.lat])
-          .addTo(map);
-        pointARef.current = new maplibregl.LngLat(nearestNode.lng, nearestNode.lat);
-
-      } else if (!markerBRef.current) {
-        markerBRef.current = new maplibregl.Marker({ color: "#0b8df5" })
-          .setLngLat([nearestNode.lng, nearestNode.lat])
-          .addTo(map);
-        pointBRef.current = new maplibregl.LngLat(nearestNode.lng, nearestNode.lat);
-      }
-
-      // right click para mo pili ug marker na e move.
-      markerARef.current.getElement().addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        if (activeMarkerRef.current === markerARef.current) {
-          console.log("Marker A is now active");
-        } else {
-          activeMarkerRef.current = markerARef.current;
-        }
-      });
-
-      markerBRef.current?.getElement().addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        if (activeMarkerRef.current === markerBRef.current) {
-          console.log("Marker B is now active");
-        } else {
-          activeMarkerRef.current = markerBRef.current;
-        }
-      });
-
-      activeMarkerRef.current?.setLngLat([nearestNode.lng, nearestNode.lat]).addTo(map);
-      if (activeMarkerRef.current === markerARef.current) {
-        pointARef.current = new maplibregl.LngLat(nearestNode.lng, nearestNode.lat);
-      } else if (activeMarkerRef.current === markerBRef.current) {
-        pointBRef.current = new maplibregl.LngLat(nearestNode.lng, nearestNode.lat);
-      }
-
-      if (pointARef.current && pointBRef.current) {
-        const distance = calculateDistance(pointARef.current, pointBRef.current)
-        console.log("Distance: ", distance)
-      }
-     
-
-    };
-
-    const calculateDistance = (pointA: maplibregl.LngLat, pointB: maplibregl.LngLat) => {
-      const R = 6371000; 
-
-      const lat1 = (pointA.lat * Math.PI) / 180;
-      const lat2 = (pointB.lat * Math.PI) / 180;
-
-      const deltaLat = ((pointB.lat - pointA.lat) * Math.PI) / 180;
-      const deltaLng = ((pointB.lng - pointA.lng) * Math.PI) / 180;
-
-      const a =
-        Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
-        Math.cos(lat1) *
-        Math.cos(lat2) *
-        Math.sin(deltaLng / 2) *
-        Math.sin(deltaLng / 2);
-
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-      const distance = R * c;
-
-      return distance; 
-    };
-    
-    const loadRoadGraph = async () => {
-      if (!map.isStyleLoaded()) return;
-
-      if (map.getZoom() < MIN_GRAPH_ZOOM) {
-        roadGraphRef.current = null;
+      if (roadGraphRef.current) {
+        setRoadGraphData(map, roadGraphRef.current);
+        setRoadGraphLayerVisibility(map, true);
+      } else {
         clearRoadGraph(map);
         setRoadGraphLayerVisibility(map, false);
-        return;
       }
 
-      if (isLoadingRef.current) return;
-      isLoadingRef.current = true;
-
-      const bounds = map.getBounds();
-
-      const requestKey = [
-        Math.floor(map.getZoom()),
-        bounds.getWest().toFixed(2),
-        bounds.getSouth().toFixed(2),
-        bounds.getEast().toFixed(2),
-        bounds.getNorth().toFixed(2),
-      ].join(":");
-
-      if (requestKey === lastRequestKeyRef.current && roadGraphRef.current) {
-        setRoadGraphLayerVisibility(map, true);
-
-        if (pendingSnapRef.current) {
-          snapMarkerToNearestNode(pendingSnapRef.current, roadGraphRef.current);
-          pendingSnapRef.current = null;
-        }
-
-        isLoadingRef.current = false;
-        return;
-      }
-
-      lastRequestKeyRef.current = requestKey;
-
-      if (debounceTimerRef.current) {
-        window.clearTimeout(debounceTimerRef.current);
-      }
-
-      debounceTimerRef.current = window.setTimeout(async () => {
-        try {
-          ensureRoadGraphLayers(map);
-
-          const graph = await fetchRoadGraphForBounds(
-            {
-              west: bounds.getWest(),
-              south: bounds.getSouth(),
-              east: bounds.getEast(),
-              north: bounds.getNorth(),
-            },
-            { signal: undefined, zoom: map.getZoom() }
-          );
-
-          roadGraphRef.current = graph;
-
-          getGeoJsonSource(map, ROAD_EDGE_SOURCE_ID)?.setData(
-            roadGraphToEdgeFeatureCollection(graph)
-          );
-
-          getGeoJsonSource(map, ROAD_NODE_SOURCE_ID)?.setData(
-            roadGraphToNodeFeatureCollection(graph)
-          );
-
-          setRoadGraphLayerVisibility(map, true);
-
-          if (pendingSnapRef.current) {
-            snapMarkerToNearestNode(pendingSnapRef.current, graph);
-            pendingSnapRef.current = null;
-          }
-
-        } catch (error) {
-          console.error("Failed to load road graph", error);
-
-          roadGraphRef.current = null;
-          clearRoadGraph(map);
-          setRoadGraphLayerVisibility(map, false);
-
-        } finally {
-          isLoadingRef.current = false;
-        }
-      }, REQUEST_DEBOUNCE_MS);
-    };
-
-    const onMapClick = (e: maplibregl.MapMouseEvent) => {
-      if (roadGraphRef.current) {
-        snapMarkerToNearestNode(e.lngLat, roadGraphRef.current);
-        return;
-      }
-
-      pendingSnapRef.current = maplibregl.LngLat.convert(e.lngLat);
-
-      if (map.getZoom() < MIN_GRAPH_ZOOM) {
-        map.easeTo({ zoom: MIN_GRAPH_ZOOM, duration: 800 });
+      if (selectionCircleRef.current) {
+        setSelectionRadius(map, selectionCircleRef.current);
       } else {
-        void loadRoadGraph();
+        clearSelectionRadius(map);
       }
     };
 
-    map.on("click", onMapClick);
-    map.on("load", () => {
-      ensureRoadGraphLayers(map);
-      void loadRoadGraph();
-    });
-    map.on('styleimagemissing', (e) => {
-      if (!e.id || e.id.startsWith('road') || e.id === '') return;
+    const handleMapClick = async (event: maplibregl.MapMouseEvent) => {
+      const clickPoint: [number, number] = [event.lngLat.lng, event.lngLat.lat];
+      lastClickPointRef.current = clickPoint;
+      await applySelectionAtPoint(clickPoint, radiusKmRef.current);
+    };
 
-      console.warn('Missing image:', e.id);
-    });
-    map.on("moveend", () => void loadRoadGraph());
-    map.on("styledata", () => {
+    const handleLoad = () => {
+      syncOverlayState();
+    };
+
+    const handleStyleData = () => {
       if (map.isStyleLoaded()) {
-        ensureRoadGraphLayers(map);
-        setRoadGraphLayerVisibility(map, true);
-        void loadRoadGraph();
+        syncOverlayState();
       }
-    });
+    };
+
+    map.on("click", handleMapClick);
+    map.on("load", handleLoad);
+    map.on("styledata", handleStyleData);
 
     return () => {
-      map.off("click", onMapClick);
-      if (debounceTimerRef.current) {
-        window.clearTimeout(debounceTimerRef.current);
-      }
+      clickAbortControllerRef.current?.abort();
+      map.off("click", handleMapClick);
+      map.off("load", handleLoad);
+      map.off("styledata", handleStyleData);
+      startMarkerRef.current?.remove();
+      startMarkerRef.current = null;
       map.remove();
       mapRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    radiusKmRef.current = effectiveRadiusKm;
+
+    if (lastClickPointRef.current) {
+      applySelectionAtPoint(lastClickPointRef.current, effectiveRadiusKm);
+    }
+  }, [applySelectionAtPoint, effectiveRadiusKm]);
 
   useEffect(() => {
     if (mapRef.current) {

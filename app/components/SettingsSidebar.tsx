@@ -5,6 +5,8 @@ interface SettingsSidebarProps {
   onClose: () => void;
   mapStyle?: MapStyleType;
   onMapStyleChange?: (style: MapStyleType) => void;
+  radiusKm?: number;
+  onRadiusChange?: (radiusKm: number) => void;
 }
 
 export function SettingsSidebar({
@@ -12,6 +14,8 @@ export function SettingsSidebar({
   onClose,
   mapStyle = "dark",
   onMapStyleChange,
+  radiusKm = 0.15,
+  onRadiusChange,
 }: SettingsSidebarProps) {
   return (
     <>
@@ -93,6 +97,27 @@ export function SettingsSidebar({
               <div className="mt-2 flex justify-between text-xs text-slate-400">
                 <span>Slow</span>
                 <span>Fast</span>
+              </div>
+            </div>
+
+            {/* Radius section */}
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Selection Radius
+              </label>
+              <input
+                type="range"
+                min="0.05"
+                max="1"
+                step="0.05"
+                value={radiusKm}
+                onChange={(event) => onRadiusChange?.(Number(event.target.value))}
+                className="mt-2 w-full"
+              />
+              <div className="mt-2 flex justify-between text-xs text-slate-400">
+                <span>0.05 km</span>
+                <span>{radiusKm.toFixed(2)} km</span>
+                <span>1 km</span>
               </div>
             </div>
 

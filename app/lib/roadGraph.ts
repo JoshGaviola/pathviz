@@ -61,6 +61,8 @@ const OVERPASS_API_URLS = [
   "https://lz4.overpass-api.de/api/interpreter",
 ];
 
+const highWayExclude = ["footway", "street_lamp", "steps", "pedestrian", "track", "path"];
+
 const DEFAULT_PRECISION = 6;
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 16;
@@ -105,20 +107,168 @@ function getDistanceMeters(a: Coordinate, b: Coordinate): number {
   return earthRadiusMeters * centralAngle;
 }
 
-function createOverpassRoadQuery(bounds: BoundingBox): string {
-  return `
-[out:json][timeout:25];
-(
-  way["highway"~"motorway|primary|secondary|tertiary"](${bounds.south},${bounds.west},${bounds.north},${bounds.east});
-);
-(._;>;);
-out body;
-`;
+export function createGeoJSONCircle(
+  center: Coordinate,
+  radiusInKm: number,
+  points = 64
+): Coordinate[] {
+  const [longitude, latitude] = center;
+  const distanceX = radiusInKm / (111.32 * Math.cos((latitude * Math.PI) / 180));
+  const distanceY = radiusInKm / 110.574;
+  const ring: Coordinate[] = [];
+
+  for (let index = 0; index < points; index += 1) {
+    const theta = (index / points) * 2 * Math.PI;
+    const x = distanceX * Math.cos(theta);
+    const y = distanceY * Math.sin(theta);
+
+    ring.push([longitude + x, latitude + y]);
+  }
+
+  ring.push(ring[0]);
+  return ring;
 }
 
-function normalizeBoundsKey(bounds: BoundingBox, zoom: number): string {
+export function getBoundingBoxFromPolygon(
+  polygon: Coordinate[]
+): [{ latitude: number; longitude: number }, { latitude: number; longitude: number }] {
+  let minLat = Number.POSITIVE_INFINITY;
+  let maxLat = Number.NEGATIVE_INFINITY;
+  let minLon = Number.POSITIVE_INFINITY;
+  let maxLon = Number.NEGATIVE_INFINITY;
+
+  for (const [longitude, latitude] of polygon) {
+    minLon = Math.min(minLon, longitude);
+    maxLon = Math.max(maxLon, longitude);
+    minLat = Math.min(minLat, latitude);
+    maxLat = Math.max(maxLat, latitude);
+  }
+
+  return [
+    { latitude: minLat, longitude: minLon },
+    { latitude: maxLat, longitude: maxLon },
+  ];
+}
+
+function createOverpassQuery(
+  boundingBox: [{ latitude: number; longitude: number }, { latitude: number; longitude: number }]
+): string {
+  const exclusion = highWayExclude.map((entry) => `[highway!="${entry}"]`).join("");
+
+  return `
+[out:json];(
+    way[highway]${exclusion}[footway!="*"]
+    (${boundingBox[0].latitude},${boundingBox[0].longitude},${boundingBox[1].latitude},${boundingBox[1].longitude});
+    node(w);
+);
+out skel;`;
+}
+
+function normalizeBoundsKey(
+  bounds: [{ latitude: number; longitude: number }, { latitude: number; longitude: number }],
+  zoom: number
+): string {
   const round = (value: number) => Math.round(value * 20) / 20;
-  return [zoom, round(bounds.west), round(bounds.south), round(bounds.east), round(bounds.north)].join(",");
+  return [
+    zoom,
+    round(bounds[0].longitude),
+    round(bounds[0].latitude),
+    round(bounds[1].longitude),
+    round(bounds[1].latitude),
+  ].join(",");
+}
+
+async function fetchOverpassResponse(
+  query: string,
+  signal?: AbortSignal
+): Promise<Response> {
+  let lastError: unknown = null;
+
+  for (const endpoint of OVERPASS_API_URLS) {
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        body: query,
+        signal,
+      });
+
+      if (!response.ok) {
+        lastError = new OverpassError(
+          response.status,
+          `Overpass request failed with status ${response.status} from ${endpoint}`
+        );
+
+        if (response.status === 429) {
+          throw lastError;
+        }
+
+        continue;
+      }
+
+      return response;
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+
+      lastError = error;
+    }
+  }
+
+  if (lastError instanceof OverpassError) {
+    throw lastError;
+  }
+
+  throw new Error("Unable to load data from any Overpass endpoint");
+}
+
+export function fetchOverpassData(
+  boundingBox: [{ latitude: number; longitude: number }, { latitude: number; longitude: number }],
+  signal?: AbortSignal
+): Promise<Response> {
+  const query = createOverpassQuery(boundingBox);
+  return fetchOverpassResponse(query, signal);
+}
+
+export async function getNearestNode(
+  latitude: number,
+  longitude: number,
+  radiusKm = 0.15,
+  signal?: AbortSignal
+): Promise<OverpassNode | null> {
+  const circle = createGeoJSONCircle([longitude, latitude], radiusKm);
+  const boundingBox = getBoundingBoxFromPolygon(circle);
+  const response = await fetchOverpassData(boundingBox, signal);
+  const data = (await response.json()) as OverpassResponse;
+
+  let result: OverpassNode | null = null;
+
+  for (const node of data.elements) {
+    if (node.type !== "node") {
+      continue;
+    }
+
+    if (!result) {
+      result = node;
+      continue;
+    }
+
+    const newLength = Math.hypot(node.lat - latitude, node.lon - longitude);
+    const resultLength = Math.hypot(result.lat - latitude, result.lon - longitude);
+
+    if (newLength < resultLength) {
+      result = node;
+    }
+  }
+
+  return result;
+}
+
+export async function getMapGraph(
+  bounds: [{ latitude: number; longitude: number }, { latitude: number; longitude: number }],
+  signal?: AbortSignal
+): Promise<RoadGraph> {
+  return fetchRoadGraphForBounds(bounds, { signal });
 }
 
 function getCachedGraph(cacheKey: string): RoadGraph | null {
@@ -156,7 +306,7 @@ function storeCachedGraph(cacheKey: string, graph: RoadGraph) {
 }
 
 export async function fetchRoadGraphForBounds(
-  bounds: BoundingBox,
+  bounds: [{ latitude: number; longitude: number }, { latitude: number; longitude: number }],
   options?: { signal?: AbortSignal; precision?: number; zoom?: number }
 ): Promise<RoadGraph> {
   const precision = options?.precision ?? DEFAULT_PRECISION;
@@ -168,48 +318,12 @@ export async function fetchRoadGraphForBounds(
     return cachedGraph;
   }
 
-  const query = createOverpassRoadQuery(bounds);
-  let lastError: unknown = null;
+  const response = await fetchOverpassData(bounds, options?.signal);
+  const payload = (await response.json()) as OverpassResponse;
+  const graph = buildRoadGraphFromOverpass(payload, precision);
 
-  for (const endpoint of OVERPASS_API_URLS) {
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        body: query,
-        signal: options?.signal,
-      });
-
-      if (!response.ok) {
-        lastError = new OverpassError(
-          response.status,
-          `Overpass request failed with status ${response.status} from ${endpoint}`
-        );
-
-        if (response.status === 429) {
-          throw lastError;
-        }
-
-        continue;
-      }
-
-      const payload = (await response.json()) as OverpassResponse;
-      const graph = buildRoadGraphFromOverpass(payload, precision);
-      storeCachedGraph(cacheKey, graph);
-      return graph;
-    } catch (error) {
-      if (options?.signal?.aborted) {
-        throw error;
-      }
-
-      lastError = error;
-    }
-  }
-
-  if (lastError instanceof OverpassError) {
-    throw lastError;
-  }
-
-  throw new Error("Unable to load road graph from any Overpass endpoint");
+  storeCachedGraph(cacheKey, graph);
+  return graph;
 }
 
 export function buildRoadGraphFromOverpass(
@@ -346,6 +460,48 @@ export function roadGraphToEdgeFeatureCollection(
   return {
     type: "FeatureCollection",
     features,
+  };
+}
+
+export function filterRoadGraphToRadius(
+  graph: RoadGraph,
+  center: Coordinate,
+  radiusKm: number
+): RoadGraph {
+  const radiusMeters = radiusKm * 1000;
+  const keptNodeIds = new Set<string>();
+
+  for (const node of Object.values(graph.nodes)) {
+    if (getDistanceMeters([node.lng, node.lat], center) <= radiusMeters) {
+      keptNodeIds.add(node.id);
+    }
+  }
+
+  const nodes: Record<string, RoadNode> = {};
+  for (const nodeId of keptNodeIds) {
+    const node = graph.nodes[nodeId];
+    if (node) {
+      nodes[nodeId] = {
+        ...node,
+        neighborIds: [],
+      };
+    }
+  }
+
+  const edges: RoadEdge[] = [];
+  for (const edge of graph.edges) {
+    if (!keptNodeIds.has(edge.from) || !keptNodeIds.has(edge.to)) {
+      continue;
+    }
+
+    edges.push(edge);
+    nodes[edge.from]?.neighborIds.push(edge.to);
+    nodes[edge.to]?.neighborIds.push(edge.from);
+  }
+
+  return {
+    nodes,
+    edges,
   };
 }
 
