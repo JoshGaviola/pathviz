@@ -7,6 +7,7 @@ import {
   getBoundingBoxFromPolygon,
   getMapGraph,
   getNearestNode,
+  getNearestPointOnRoad,
   filterRoadGraphToRadius,
   roadGraphToEdgeFeatureCollection,
   roadGraphToNodeFeatureCollection,
@@ -254,6 +255,15 @@ export function MapContainer({
 
         const filteredGraph = filterRoadGraphToRadius(graph, center, radiusKm);
         roadGraphRef.current = filteredGraph;
+
+        // Snap the marker to the nearest point on the road
+        const snappedPoint = getNearestPointOnRoad(center[1], center[0], filteredGraph);
+        if (snappedPoint) {
+          setStartMarker(map, startMarkerRef, snappedPoint);
+        } else {
+          setStartMarker(map, startMarkerRef, center);
+        }
+
         setRoadGraphData(map, filteredGraph);
         setRoadGraphLayerVisibility(map, true);
       } catch (error) {
@@ -310,7 +320,16 @@ export function MapContainer({
           return;
         }
 
-        setEndMarker(map, endMarkerRef, center);
+        // Snap the end marker to the nearest point on the road
+        let markerPosition = center;
+        if (roadGraphRef.current) {
+          const snappedPoint = getNearestPointOnRoad(center[1], center[0], roadGraphRef.current);
+          if (snappedPoint) {
+            markerPosition = snappedPoint;
+          }
+        }
+
+        setEndMarker(map, endMarkerRef, markerPosition);
       } catch (error) {
         if (!abortController.signal.aborted) {
           console.error("Failed to resolve the nearest end node", error);
@@ -321,7 +340,7 @@ export function MapContainer({
         }
       }
     },
-    [getNearestNode, setEndMarker]
+    [getNearestNode, getNearestPointOnRoad, setEndMarker]
   );
 
   useEffect(() => {

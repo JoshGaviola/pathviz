@@ -106,7 +106,55 @@ function getDistanceMeters(a: Coordinate, b: Coordinate): number {
 
   return earthRadiusMeters * centralAngle;
 }
+function getClosestPointOnLineSegment(point: Coordinate, segmentStart: Coordinate, segmentEnd: Coordinate): Coordinate {
+  const [px, py] = point;
+  const [x1, y1] = segmentStart;
+  const [x2, y2] = segmentEnd;
 
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const lengthSquared = dx * dx + dy * dy;
+
+  if (lengthSquared === 0) {
+    return segmentStart;
+  }
+
+  let t = ((px - x1) * dx + (py - y1) * dy) / lengthSquared;
+  t = Math.max(0, Math.min(1, t));
+
+  return [x1 + t * dx, y1 + t * dy];
+}
+
+export function getNearestPointOnRoad(
+  latitude: number,
+  longitude: number,
+  graph: RoadGraph
+): Coordinate | null {
+  const point: Coordinate = [longitude, latitude];
+  let nearestPoint: Coordinate | null = null;
+  let minDistance = Number.POSITIVE_INFINITY;
+
+  for (const edge of graph.edges) {
+    const fromNode = graph.nodes[edge.from];
+    const toNode = graph.nodes[edge.to];
+
+    if (!fromNode || !toNode) {
+      continue;
+    }
+
+    const from: Coordinate = [fromNode.lng, fromNode.lat];
+    const to: Coordinate = [toNode.lng, toNode.lat];
+    const closest = getClosestPointOnLineSegment(point, from, to);
+    const distance = getDistanceMeters(point, closest);
+
+    if (distance < minDistance) {
+      minDistance = distance;
+      nearestPoint = closest;
+    }
+  }
+
+  return nearestPoint;
+}
 export function createGeoJSONCircle(
   center: Coordinate,
   radiusInKm: number,
