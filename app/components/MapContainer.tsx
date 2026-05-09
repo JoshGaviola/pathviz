@@ -12,10 +12,9 @@ import {
   getMapGraph,
   getNearestPointOnRoad,
   roadGraphToEdgeFeatureCollection,
-  roadGraphToNodeFeatureCollection,
   type RoadGraph,
 } from "../lib/roadGraph";
-import { PathfindingRunner, type PathfindingAlgorithmType } from "../lib/pathfinding";
+import { PathfindingRunner, type PathfindingAlgorithmType, type SearchSnapshot } from "../lib/pathfinding";
 
 interface MapContainerProps {
   mapStyle?: MapStyleType;
@@ -27,24 +26,19 @@ interface MapContainerProps {
   onPlaybackReadyChange?: (ready: boolean) => void;
 }
 
-const ROAD_NODE_SOURCE_ID = "road-node-source";
 const ROAD_EDGE_SOURCE_ID = "road-edge-source";
-const ROAD_NODE_LAYER_ID = "road-node-layer";
 const ROAD_EDGE_LAYER_ID = "road-edge-layer";
 const SELECTION_RADIUS_SOURCE_ID = "selection-radius-source";
 const SELECTION_RADIUS_FILL_LAYER_ID = "selection-radius-fill-layer";
 const SELECTION_RADIUS_LINE_LAYER_ID = "selection-radius-line-layer";
-const VISITED_NODE_SOURCE_ID = "visited-node-source";
-const VISITED_NODE_LAYER_ID = "visited-node-layer";
-const FRONTIER_NODE_SOURCE_ID = "frontier-node-source";
-const FRONTIER_NODE_LAYER_ID = "frontier-node-layer";
+const EXPLORED_EDGE_SOURCE_ID = "explored-edge-source";
+const EXPLORED_EDGE_LAYER_ID = "explored-edge-layer";
 const PATH_EDGE_SOURCE_ID = "path-edge-source";
 const PATH_EDGE_LAYER_ID = "path-edge-layer";
 const SELECTION_RADIUS_KM = 2;
 
 interface PathfindingVisualState {
-  visitedNodeIds: string[];
-  frontierNodeIds: string[];
+  exploredEdgeKeys: string[];
   pathEdgeKeys: string[];
 }
 
@@ -76,31 +70,9 @@ function ensureRoadGraphLayers(map: maplibregl.Map): void {
       type: "line",
       source: ROAD_EDGE_SOURCE_ID,
       paint: {
-        "line-color": "#111827",
-        "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.8, 14, 3.2, 18, 4.6],
-        "line-opacity": 0.7,
-      },
-    });
-  }
-
-  if (!map.getSource(ROAD_NODE_SOURCE_ID)) {
-    map.addSource(ROAD_NODE_SOURCE_ID, {
-      type: "geojson",
-      data: { type: "FeatureCollection", features: [] },
-    });
-  }
-
-  if (!map.getLayer(ROAD_NODE_LAYER_ID)) {
-    map.addLayer({
-      id: ROAD_NODE_LAYER_ID,
-      type: "circle",
-      source: ROAD_NODE_SOURCE_ID,
-      paint: {
-        "circle-color": "#f59e0b",
-        "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 1.4, 10, 2.8, 14, 4.8, 18, 7],
-        "circle-stroke-color": "#ffffff",
-        "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 1, 0.2, 10, 0.7, 16, 1.6],
-        "circle-opacity": 0.95,
+        "line-color": "#1F2937",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.2, 14, 2.2, 18, 3.2],
+        "line-opacity": 0.6,
       },
     });
   }
@@ -118,8 +90,8 @@ function ensureRoadGraphLayers(map: maplibregl.Map): void {
       type: "fill",
       source: SELECTION_RADIUS_SOURCE_ID,
       paint: {
-        "fill-color": "#ef4444",
-        "fill-opacity": 0.12,
+        "fill-color": "#059669",
+        "fill-opacity": 0.08,
       },
     });
   }
@@ -130,53 +102,31 @@ function ensureRoadGraphLayers(map: maplibregl.Map): void {
       type: "line",
       source: SELECTION_RADIUS_SOURCE_ID,
       paint: {
-        "line-color": "#ef4444",
-        "line-width": 2,
-        "line-opacity": 0.75,
+        "line-color": "#047857",
+        "line-width": 2.5,
+        "line-opacity": 0.7,
       },
     });
   }
 }
 
 function ensurePathfindingLayers(map: maplibregl.Map): void {
-  if (!map.getSource(VISITED_NODE_SOURCE_ID)) {
-    map.addSource(VISITED_NODE_SOURCE_ID, {
+  if (!map.getSource(EXPLORED_EDGE_SOURCE_ID)) {
+    map.addSource(EXPLORED_EDGE_SOURCE_ID, {
       type: "geojson",
       data: { type: "FeatureCollection", features: [] },
     });
   }
 
-  if (!map.getLayer(VISITED_NODE_LAYER_ID)) {
+  if (!map.getLayer(EXPLORED_EDGE_LAYER_ID)) {
     map.addLayer({
-      id: VISITED_NODE_LAYER_ID,
-      type: "circle",
-      source: VISITED_NODE_SOURCE_ID,
+      id: EXPLORED_EDGE_LAYER_ID,
+      type: "line",
+      source: EXPLORED_EDGE_SOURCE_ID,
       paint: {
-        "circle-color": "#34d399",
-        "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 1.6, 10, 3.4, 14, 5.4, 18, 8],
-        "circle-opacity": 0.95,
-      },
-    });
-  }
-
-  if (!map.getSource(FRONTIER_NODE_SOURCE_ID)) {
-    map.addSource(FRONTIER_NODE_SOURCE_ID, {
-      type: "geojson",
-      data: { type: "FeatureCollection", features: [] },
-    });
-  }
-
-  if (!map.getLayer(FRONTIER_NODE_LAYER_ID)) {
-    map.addLayer({
-      id: FRONTIER_NODE_LAYER_ID,
-      type: "circle",
-      source: FRONTIER_NODE_SOURCE_ID,
-      paint: {
-        "circle-color": "#facc15",
-        "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 1.8, 10, 3.8, 14, 6, 18, 8.8],
-        "circle-opacity": 0.96,
-        "circle-stroke-color": "#111827",
-        "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 1, 0.3, 10, 0.8, 14, 1.2],
+        "line-color": "#46B780",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 1, 1.2, 10, 2.4, 14, 4.2, 18, 6.4],
+        "line-opacity": 0.85,
       },
     });
   }
@@ -194,8 +144,8 @@ function ensurePathfindingLayers(map: maplibregl.Map): void {
       type: "line",
       source: PATH_EDGE_SOURCE_ID,
       paint: {
-        "line-color": "#60a5fa",
-        "line-width": ["interpolate", ["linear"], ["zoom"], 1, 1.5, 10, 3.2, 14, 5.4, 18, 7.8],
+        "line-color": "#A50D20",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 1, 1.8, 10, 3.6, 14, 5.8, 18, 8.4],
         "line-opacity": 0.95,
       },
     });
@@ -208,15 +158,10 @@ function setRoadGraphLayerVisibility(map: maplibregl.Map, visible: boolean): voi
   if (map.getLayer(ROAD_EDGE_LAYER_ID)) {
     map.setLayoutProperty(ROAD_EDGE_LAYER_ID, "visibility", visibility);
   }
-
-  if (map.getLayer(ROAD_NODE_LAYER_ID)) {
-    map.setLayoutProperty(ROAD_NODE_LAYER_ID, "visibility", visibility);
-  }
 }
 
 function clearRoadGraph(map: maplibregl.Map): void {
   getGeoJsonSource(map, ROAD_EDGE_SOURCE_ID)?.setData({ type: "FeatureCollection", features: [] });
-  getGeoJsonSource(map, ROAD_NODE_SOURCE_ID)?.setData({ type: "FeatureCollection", features: [] });
 }
 
 function clearSelectionRadius(map: maplibregl.Map): void {
@@ -227,11 +172,7 @@ function clearSelectionRadius(map: maplibregl.Map): void {
 }
 
 function clearPathfindingVisualization(map: maplibregl.Map): void {
-  getGeoJsonSource(map, VISITED_NODE_SOURCE_ID)?.setData({
-    type: "FeatureCollection",
-    features: [],
-  });
-  getGeoJsonSource(map, FRONTIER_NODE_SOURCE_ID)?.setData({
+  getGeoJsonSource(map, EXPLORED_EDGE_SOURCE_ID)?.setData({
     type: "FeatureCollection",
     features: [],
   });
@@ -263,7 +204,7 @@ function setStartMarker(
   lngLat: [number, number]
 ): void {
   if (!markerRef.current) {
-    markerRef.current = new maplibregl.Marker({ color: "#ef4444" });
+    markerRef.current = new maplibregl.Marker({ color: "#46B780" });
   }
 
   markerRef.current.setLngLat(lngLat).addTo(map);
@@ -275,7 +216,7 @@ function setEndMarker(
   lngLat: [number, number]
 ): void {
   if (!markerRef.current) {
-    markerRef.current = new maplibregl.Marker({ color: "#3b82f6" });
+    markerRef.current = new maplibregl.Marker({ color: "#980C0C" });
   }
 
   markerRef.current.setLngLat(lngLat).addTo(map);
@@ -283,32 +224,23 @@ function setEndMarker(
 
 function setRoadGraphData(map: maplibregl.Map, graph: RoadGraph): void {
   getGeoJsonSource(map, ROAD_EDGE_SOURCE_ID)?.setData(roadGraphToEdgeFeatureCollection(graph));
-  getGeoJsonSource(map, ROAD_NODE_SOURCE_ID)?.setData(roadGraphToNodeFeatureCollection(graph));
 }
 
-function toNodeFeatureCollection(graph: RoadGraph, nodeIds: string[]): GeoJSON.FeatureCollection {
-  const features: GeoJSON.Feature<GeoJSON.Point>[] = [];
+function toExploredEdgesFromSnapshot(
+  graph: RoadGraph,
+  snapshot: SearchSnapshot
+): string[] {
+  const exploredNodeIds = new Set([...snapshot.visitedNodeIds, ...snapshot.frontierNodeIds]);
+  const exploredEdgeKeys: string[] = [];
 
-  for (const nodeId of nodeIds) {
-    const node = graph.nodes[nodeId];
-    if (!node) {
-      continue;
+  for (const edge of graph.edges) {
+    if (exploredNodeIds.has(edge.from) || exploredNodeIds.has(edge.to)) {
+      const key = getEdgeKey(edge.from, edge.to);
+      exploredEdgeKeys.push(key);
     }
-
-    features.push({
-      type: "Feature",
-      properties: { id: nodeId },
-      geometry: {
-        type: "Point",
-        coordinates: [node.lng, node.lat],
-      },
-    });
   }
 
-  return {
-    type: "FeatureCollection",
-    features,
-  };
+  return exploredEdgeKeys;
 }
 
 function toPathEdgeFeatureCollection(
@@ -354,11 +286,8 @@ function setPathfindingVisualization(
   graph: RoadGraph,
   state: PathfindingVisualState
 ): void {
-  getGeoJsonSource(map, VISITED_NODE_SOURCE_ID)?.setData(
-    toNodeFeatureCollection(graph, state.visitedNodeIds)
-  );
-  getGeoJsonSource(map, FRONTIER_NODE_SOURCE_ID)?.setData(
-    toNodeFeatureCollection(graph, state.frontierNodeIds)
+  getGeoJsonSource(map, EXPLORED_EDGE_SOURCE_ID)?.setData(
+    toPathEdgeFeatureCollection(graph, state.exploredEdgeKeys)
   );
   getGeoJsonSource(map, PATH_EDGE_SOURCE_ID)?.setData(
     toPathEdgeFeatureCollection(graph, state.pathEdgeKeys)
@@ -397,8 +326,7 @@ export function MapContainer({
   const playbackReadyRef = useRef(false);
   const lastPlaybackCommandIdRef = useRef<number>(0);
   const pathfindingStateRef = useRef<PathfindingVisualState>({
-    visitedNodeIds: [],
-    frontierNodeIds: [],
+    exploredEdgeKeys: [],
     pathEdgeKeys: [],
   });
   const effectiveRadiusKm = selectionRadiusKm ?? SELECTION_RADIUS_KM;
@@ -453,8 +381,7 @@ export function MapContainer({
     stopPathfindingAnimation();
     runnerRef.current = null;
     applyPathfindingState({
-      visitedNodeIds: [],
-      frontierNodeIds: [],
+      exploredEdgeKeys: [],
       pathEdgeKeys: [],
     });
   }, [applyPathfindingState, stopPathfindingAnimation]);
@@ -472,8 +399,7 @@ export function MapContainer({
     runnerRef.current = runner;
     const initialSnapshot = runner.getSnapshot();
     applyPathfindingState({
-      visitedNodeIds: initialSnapshot.visitedNodeIds,
-      frontierNodeIds: initialSnapshot.frontierNodeIds,
+      exploredEdgeKeys: toExploredEdgesFromSnapshot(graph, initialSnapshot),
       pathEdgeKeys: initialSnapshot.pathEdgeKeys,
     });
 
@@ -482,15 +408,15 @@ export function MapContainer({
 
   const runPathfindingStep = useCallback(() => {
     const runner = runnerRef.current;
-    if (!runner) {
+    const graph = roadGraphRef.current;
+    if (!runner || !graph) {
       return;
     }
 
     const snapshot = runner.nextStep();
 
     applyPathfindingState({
-      visitedNodeIds: snapshot.visitedNodeIds,
-      frontierNodeIds: snapshot.frontierNodeIds,
+      exploredEdgeKeys: toExploredEdgesFromSnapshot(graph, snapshot),
       pathEdgeKeys: snapshot.pathEdgeKeys,
     });
 
