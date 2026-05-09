@@ -147,20 +147,20 @@ export function SettingsSidebar({
               </label>
               <div className="mt-3 space-y-2">
                 <div className="flex items-center gap-3">
-                  <div className="h-3 w-3 rounded-full bg-emerald-400" />
-                  <span className="text-sm text-slate-300">Visited nodes</span>
+                  <div className="h-3 w-3 rounded bg-emerald-500" />
+                  <span className="text-sm text-slate-300">Explored edges</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="h-3 w-3 rounded-full bg-yellow-400" />
-                  <span className="text-sm text-slate-300">Frontier</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="h-3 w-3 rounded-full bg-blue-400" />
+                  <div className="h-3 w-3 rounded bg-red-700" />
                   <span className="text-sm text-slate-300">Shortest path</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="h-3 w-3 rounded-full bg-red-400" />
-                  <span className="text-sm text-slate-300">Start / Goal</span>
+                  <div className="h-3 w-3 rounded-full bg-emerald-500" />
+                  <span className="text-sm text-slate-300">Start point</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="h-3 w-3 rounded-full bg-red-800" />
+                  <span className="text-sm text-slate-300">End point</span>
                 </div>
               </div>
             </div>

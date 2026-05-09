@@ -294,11 +294,6 @@ function setPathfindingVisualization(
   );
 }
 
-function getStepDelayMs(animationSpeed: number): number {
-  const safeSpeed = Math.max(0.1, animationSpeed);
-  return Math.max(35, Math.round(420 / safeSpeed));
-}
-
 export function MapContainer({
   mapStyle = "streets",
   selectionRadiusKm,
@@ -321,10 +316,11 @@ export function MapContainer({
   const startNodeIdRef = useRef<string | null>(null);
   const endNodeIdRef = useRef<string | null>(null);
   const runnerRef = useRef<PathfindingRunner | null>(null);
-  const pathfindingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pathfindingRafRef = useRef<number | null>(null);
   const playbackRunningRef = useRef(false);
   const playbackReadyRef = useRef(false);
   const lastPlaybackCommandIdRef = useRef<number>(0);
+  const previousTimeRef = useRef<number | null>(null);
   const pathfindingStateRef = useRef<PathfindingVisualState>({
     exploredEdgeKeys: [],
     pathEdgeKeys: [],
@@ -357,10 +353,11 @@ export function MapContainer({
   );
 
   const stopPathfindingAnimation = useCallback(() => {
-    if (pathfindingTimerRef.current) {
-      clearInterval(pathfindingTimerRef.current);
-      pathfindingTimerRef.current = null;
+    if (pathfindingRafRef.current) {
+      cancelAnimationFrame(pathfindingRafRef.current);
+      pathfindingRafRef.current = null;
     }
+    previousTimeRef.current = null;
 
     setPlaybackRunning(false);
   }, [setPlaybackRunning]);
@@ -433,10 +430,19 @@ export function MapContainer({
 
     stopPathfindingAnimation();
     setPlaybackRunning(true);
+    previousTimeRef.current = null;
 
-    pathfindingTimerRef.current = setInterval(() => {
-      runPathfindingStep();
-    }, getStepDelayMs(animationSpeed));
+    const animate = (newTime: number) => {
+      const speed = Math.max(1, Math.round(animationSpeed));
+      for (let i = 0; i < speed; i++) {
+        runPathfindingStep();
+      }
+
+      previousTimeRef.current = newTime;
+      pathfindingRafRef.current = requestAnimationFrame(animate);
+    };
+
+    pathfindingRafRef.current = requestAnimationFrame(animate);
   }, [
     animationSpeed,
     createPathfindingRunner,
