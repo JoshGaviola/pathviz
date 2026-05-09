@@ -1,22 +1,30 @@
+"use client";
+
 import maplibregl from "maplibre-gl";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, type MutableRefObject } from "react";
 import { getMapStyle, type MapStyleType } from "@/app/lib/mapStyles";
 import { setMapInstance } from "../lib/mapStore";
 import {
   createGeoJSONCircle,
+  filterRoadGraphToRadius,
+  findNearestRoadNode,
   getBoundingBoxFromPolygon,
   getMapGraph,
-  getNearestNode,
   getNearestPointOnRoad,
-  filterRoadGraphToRadius,
   roadGraphToEdgeFeatureCollection,
   roadGraphToNodeFeatureCollection,
   type RoadGraph,
 } from "../lib/roadGraph";
+import { PathfindingRunner, type PathfindingAlgorithmType } from "../lib/pathfinding";
 
 interface MapContainerProps {
   mapStyle?: MapStyleType;
   selectionRadiusKm?: number;
+  algorithm?: PathfindingAlgorithmType;
+  animationSpeed?: number;
+  playbackCommand?: { id: number; action: "toggle" | "step" | "reset" };
+  onPlaybackRunningChange?: (running: boolean) => void;
+  onPlaybackReadyChange?: (ready: boolean) => void;
 }
 
 const ROAD_NODE_SOURCE_ID = "road-node-source";
@@ -26,12 +34,21 @@ const ROAD_EDGE_LAYER_ID = "road-edge-layer";
 const SELECTION_RADIUS_SOURCE_ID = "selection-radius-source";
 const SELECTION_RADIUS_FILL_LAYER_ID = "selection-radius-fill-layer";
 const SELECTION_RADIUS_LINE_LAYER_ID = "selection-radius-line-layer";
+const VISITED_NODE_SOURCE_ID = "visited-node-source";
+const VISITED_NODE_LAYER_ID = "visited-node-layer";
+const FRONTIER_NODE_SOURCE_ID = "frontier-node-source";
+const FRONTIER_NODE_LAYER_ID = "frontier-node-layer";
+const PATH_EDGE_SOURCE_ID = "path-edge-source";
+const PATH_EDGE_LAYER_ID = "path-edge-layer";
 const SELECTION_RADIUS_KM = 2;
 
-function getGeoJsonSource(
-  map: maplibregl.Map,
-  sourceId: string
-): maplibregl.GeoJSONSource | null {
+interface PathfindingVisualState {
+  visitedNodeIds: string[];
+  frontierNodeIds: string[];
+  pathEdgeKeys: string[];
+}
+
+function getGeoJsonSource(map: maplibregl.Map, sourceId: string): maplibregl.GeoJSONSource | null {
   const source = map.getSource(sourceId);
 
   if (!source || source.type !== "geojson") {
@@ -41,7 +58,11 @@ function getGeoJsonSource(
   return source as maplibregl.GeoJSONSource;
 }
 
-function ensureRoadGraphLayers(map: maplibregl.Map) {
+function getEdgeKey(a: string, b: string): string {
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
+function ensureRoadGraphLayers(map: maplibregl.Map): void {
   if (!map.getSource(ROAD_EDGE_SOURCE_ID)) {
     map.addSource(ROAD_EDGE_SOURCE_ID, {
       type: "geojson",
@@ -57,7 +78,7 @@ function ensureRoadGraphLayers(map: maplibregl.Map) {
       paint: {
         "line-color": "#111827",
         "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.8, 14, 3.2, 18, 4.6],
-        "line-opacity": 0.85,
+        "line-opacity": 0.7,
       },
     });
   }
@@ -76,10 +97,10 @@ function ensureRoadGraphLayers(map: maplibregl.Map) {
       source: ROAD_NODE_SOURCE_ID,
       paint: {
         "circle-color": "#f59e0b",
-        "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 1.5, 10, 3.2, 14, 5.8, 18, 8.2],
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 1.4, 10, 2.8, 14, 4.8, 18, 7],
         "circle-stroke-color": "#ffffff",
-        "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 1, 0.4, 10, 0.8, 16, 2],
-        "circle-opacity": 1,
+        "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 1, 0.2, 10, 0.7, 16, 1.6],
+        "circle-opacity": 0.95,
       },
     });
   }
@@ -117,7 +138,71 @@ function ensureRoadGraphLayers(map: maplibregl.Map) {
   }
 }
 
-function setRoadGraphLayerVisibility(map: maplibregl.Map, visible: boolean) {
+function ensurePathfindingLayers(map: maplibregl.Map): void {
+  if (!map.getSource(VISITED_NODE_SOURCE_ID)) {
+    map.addSource(VISITED_NODE_SOURCE_ID, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+  }
+
+  if (!map.getLayer(VISITED_NODE_LAYER_ID)) {
+    map.addLayer({
+      id: VISITED_NODE_LAYER_ID,
+      type: "circle",
+      source: VISITED_NODE_SOURCE_ID,
+      paint: {
+        "circle-color": "#34d399",
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 1.6, 10, 3.4, 14, 5.4, 18, 8],
+        "circle-opacity": 0.95,
+      },
+    });
+  }
+
+  if (!map.getSource(FRONTIER_NODE_SOURCE_ID)) {
+    map.addSource(FRONTIER_NODE_SOURCE_ID, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+  }
+
+  if (!map.getLayer(FRONTIER_NODE_LAYER_ID)) {
+    map.addLayer({
+      id: FRONTIER_NODE_LAYER_ID,
+      type: "circle",
+      source: FRONTIER_NODE_SOURCE_ID,
+      paint: {
+        "circle-color": "#facc15",
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 1.8, 10, 3.8, 14, 6, 18, 8.8],
+        "circle-opacity": 0.96,
+        "circle-stroke-color": "#111827",
+        "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 1, 0.3, 10, 0.8, 14, 1.2],
+      },
+    });
+  }
+
+  if (!map.getSource(PATH_EDGE_SOURCE_ID)) {
+    map.addSource(PATH_EDGE_SOURCE_ID, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+  }
+
+  if (!map.getLayer(PATH_EDGE_LAYER_ID)) {
+    map.addLayer({
+      id: PATH_EDGE_LAYER_ID,
+      type: "line",
+      source: PATH_EDGE_SOURCE_ID,
+      paint: {
+        "line-color": "#60a5fa",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 1, 1.5, 10, 3.2, 14, 5.4, 18, 7.8],
+        "line-opacity": 0.95,
+      },
+    });
+  }
+}
+
+function setRoadGraphLayerVisibility(map: maplibregl.Map, visible: boolean): void {
   const visibility = visible ? "visible" : "none";
 
   if (map.getLayer(ROAD_EDGE_LAYER_ID)) {
@@ -129,19 +214,34 @@ function setRoadGraphLayerVisibility(map: maplibregl.Map, visible: boolean) {
   }
 }
 
-function clearRoadGraph(map: maplibregl.Map) {
+function clearRoadGraph(map: maplibregl.Map): void {
   getGeoJsonSource(map, ROAD_EDGE_SOURCE_ID)?.setData({ type: "FeatureCollection", features: [] });
   getGeoJsonSource(map, ROAD_NODE_SOURCE_ID)?.setData({ type: "FeatureCollection", features: [] });
 }
 
-function clearSelectionRadius(map: maplibregl.Map) {
+function clearSelectionRadius(map: maplibregl.Map): void {
   getGeoJsonSource(map, SELECTION_RADIUS_SOURCE_ID)?.setData({
     type: "FeatureCollection",
     features: [],
   });
 }
 
-function setSelectionRadius(map: maplibregl.Map, circle: [number, number][]) {
+function clearPathfindingVisualization(map: maplibregl.Map): void {
+  getGeoJsonSource(map, VISITED_NODE_SOURCE_ID)?.setData({
+    type: "FeatureCollection",
+    features: [],
+  });
+  getGeoJsonSource(map, FRONTIER_NODE_SOURCE_ID)?.setData({
+    type: "FeatureCollection",
+    features: [],
+  });
+  getGeoJsonSource(map, PATH_EDGE_SOURCE_ID)?.setData({
+    type: "FeatureCollection",
+    features: [],
+  });
+}
+
+function setSelectionRadius(map: maplibregl.Map, circle: [number, number][]): void {
   getGeoJsonSource(map, SELECTION_RADIUS_SOURCE_ID)?.setData({
     type: "FeatureCollection",
     features: [
@@ -159,9 +259,9 @@ function setSelectionRadius(map: maplibregl.Map, circle: [number, number][]) {
 
 function setStartMarker(
   map: maplibregl.Map,
-  markerRef: React.MutableRefObject<maplibregl.Marker | null>,
+  markerRef: MutableRefObject<maplibregl.Marker | null>,
   lngLat: [number, number]
-) {
+): void {
   if (!markerRef.current) {
     markerRef.current = new maplibregl.Marker({ color: "#ef4444" });
   }
@@ -171,9 +271,9 @@ function setStartMarker(
 
 function setEndMarker(
   map: maplibregl.Map,
-  markerRef: React.MutableRefObject<maplibregl.Marker | null>,
+  markerRef: MutableRefObject<maplibregl.Marker | null>,
   lngLat: [number, number]
-) {
+): void {
   if (!markerRef.current) {
     markerRef.current = new maplibregl.Marker({ color: "#3b82f6" });
   }
@@ -181,14 +281,103 @@ function setEndMarker(
   markerRef.current.setLngLat(lngLat).addTo(map);
 }
 
-function setRoadGraphData(map: maplibregl.Map, graph: RoadGraph) {
+function setRoadGraphData(map: maplibregl.Map, graph: RoadGraph): void {
   getGeoJsonSource(map, ROAD_EDGE_SOURCE_ID)?.setData(roadGraphToEdgeFeatureCollection(graph));
   getGeoJsonSource(map, ROAD_NODE_SOURCE_ID)?.setData(roadGraphToNodeFeatureCollection(graph));
+}
+
+function toNodeFeatureCollection(graph: RoadGraph, nodeIds: string[]): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature<GeoJSON.Point>[] = [];
+
+  for (const nodeId of nodeIds) {
+    const node = graph.nodes[nodeId];
+    if (!node) {
+      continue;
+    }
+
+    features.push({
+      type: "Feature",
+      properties: { id: nodeId },
+      geometry: {
+        type: "Point",
+        coordinates: [node.lng, node.lat],
+      },
+    });
+  }
+
+  return {
+    type: "FeatureCollection",
+    features,
+  };
+}
+
+function toPathEdgeFeatureCollection(
+  graph: RoadGraph,
+  pathEdgeKeys: string[]
+): GeoJSON.FeatureCollection<GeoJSON.LineString> {
+  const pathKeySet = new Set(pathEdgeKeys);
+  const features: GeoJSON.Feature<GeoJSON.LineString>[] = [];
+
+  for (const edge of graph.edges) {
+    const key = getEdgeKey(edge.from, edge.to);
+    if (!pathKeySet.has(key)) {
+      continue;
+    }
+
+    const from = graph.nodes[edge.from];
+    const to = graph.nodes[edge.to];
+    if (!from || !to) {
+      continue;
+    }
+
+    features.push({
+      type: "Feature",
+      properties: { key },
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [from.lng, from.lat],
+          [to.lng, to.lat],
+        ],
+      },
+    });
+  }
+
+  return {
+    type: "FeatureCollection",
+    features,
+  };
+}
+
+function setPathfindingVisualization(
+  map: maplibregl.Map,
+  graph: RoadGraph,
+  state: PathfindingVisualState
+): void {
+  getGeoJsonSource(map, VISITED_NODE_SOURCE_ID)?.setData(
+    toNodeFeatureCollection(graph, state.visitedNodeIds)
+  );
+  getGeoJsonSource(map, FRONTIER_NODE_SOURCE_ID)?.setData(
+    toNodeFeatureCollection(graph, state.frontierNodeIds)
+  );
+  getGeoJsonSource(map, PATH_EDGE_SOURCE_ID)?.setData(
+    toPathEdgeFeatureCollection(graph, state.pathEdgeKeys)
+  );
+}
+
+function getStepDelayMs(animationSpeed: number): number {
+  const safeSpeed = Math.max(0.1, animationSpeed);
+  return Math.max(35, Math.round(420 / safeSpeed));
 }
 
 export function MapContainer({
   mapStyle = "streets",
   selectionRadiusKm,
+  algorithm = "astar",
+  animationSpeed = 1,
+  playbackCommand,
+  onPlaybackRunningChange,
+  onPlaybackReadyChange,
 }: MapContainerProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -198,11 +387,138 @@ export function MapContainer({
   const endMarkerRef = useRef<maplibregl.Marker | null>(null);
   const selectionCircleRef = useRef<[number, number][] | null>(null);
   const clickAbortControllerRef = useRef<AbortController | null>(null);
-  const endAbortControllerRef = useRef<AbortController | null>(null);
   const lastClickPointRef = useRef<[number, number] | null>(null);
   const lastEndPointRef = useRef<[number, number] | null>(null);
+  const startNodeIdRef = useRef<string | null>(null);
+  const endNodeIdRef = useRef<string | null>(null);
+  const runnerRef = useRef<PathfindingRunner | null>(null);
+  const pathfindingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const playbackRunningRef = useRef(false);
+  const playbackReadyRef = useRef(false);
+  const lastPlaybackCommandIdRef = useRef<number>(0);
+  const pathfindingStateRef = useRef<PathfindingVisualState>({
+    visitedNodeIds: [],
+    frontierNodeIds: [],
+    pathEdgeKeys: [],
+  });
   const effectiveRadiusKm = selectionRadiusKm ?? SELECTION_RADIUS_KM;
   const radiusKmRef = useRef(effectiveRadiusKm);
+
+  const setPlaybackRunning = useCallback(
+    (running: boolean) => {
+      if (playbackRunningRef.current === running) {
+        return;
+      }
+
+      playbackRunningRef.current = running;
+      onPlaybackRunningChange?.(running);
+    },
+    [onPlaybackRunningChange]
+  );
+
+  const setPlaybackReady = useCallback(
+    (ready: boolean) => {
+      if (playbackReadyRef.current === ready) {
+        return;
+      }
+
+      playbackReadyRef.current = ready;
+      onPlaybackReadyChange?.(ready);
+    },
+    [onPlaybackReadyChange]
+  );
+
+  const stopPathfindingAnimation = useCallback(() => {
+    if (pathfindingTimerRef.current) {
+      clearInterval(pathfindingTimerRef.current);
+      pathfindingTimerRef.current = null;
+    }
+
+    setPlaybackRunning(false);
+  }, [setPlaybackRunning]);
+
+  const applyPathfindingState = useCallback((state: PathfindingVisualState) => {
+    pathfindingStateRef.current = state;
+
+    const map = mapRef.current;
+    const graph = roadGraphRef.current;
+    if (!map || !graph) {
+      return;
+    }
+
+    setPathfindingVisualization(map, graph, state);
+  }, []);
+
+  const resetPathfindingState = useCallback(() => {
+    stopPathfindingAnimation();
+    runnerRef.current = null;
+    applyPathfindingState({
+      visitedNodeIds: [],
+      frontierNodeIds: [],
+      pathEdgeKeys: [],
+    });
+  }, [applyPathfindingState, stopPathfindingAnimation]);
+
+  const createPathfindingRunner = useCallback((): boolean => {
+    const graph = roadGraphRef.current;
+    const startNodeId = startNodeIdRef.current;
+    const endNodeId = endNodeIdRef.current;
+
+    if (!graph || !startNodeId || !endNodeId) {
+      return false;
+    }
+
+    const runner = new PathfindingRunner(graph, startNodeId, endNodeId, algorithm);
+    runnerRef.current = runner;
+    const initialSnapshot = runner.getSnapshot();
+    applyPathfindingState({
+      visitedNodeIds: initialSnapshot.visitedNodeIds,
+      frontierNodeIds: initialSnapshot.frontierNodeIds,
+      pathEdgeKeys: initialSnapshot.pathEdgeKeys,
+    });
+
+    return true;
+  }, [algorithm, applyPathfindingState]);
+
+  const runPathfindingStep = useCallback(() => {
+    const runner = runnerRef.current;
+    if (!runner) {
+      return;
+    }
+
+    const snapshot = runner.nextStep();
+
+    applyPathfindingState({
+      visitedNodeIds: snapshot.visitedNodeIds,
+      frontierNodeIds: snapshot.frontierNodeIds,
+      pathEdgeKeys: snapshot.pathEdgeKeys,
+    });
+
+    if (snapshot.finished) {
+      stopPathfindingAnimation();
+    }
+  }, [applyPathfindingState, stopPathfindingAnimation]);
+
+  const runPathfindingAnimation = useCallback(() => {
+    if (!runnerRef.current && !createPathfindingRunner()) {
+      resetPathfindingState();
+      return;
+    }
+
+    stopPathfindingAnimation();
+    setPlaybackRunning(true);
+
+    pathfindingTimerRef.current = setInterval(() => {
+      runPathfindingStep();
+    }, getStepDelayMs(animationSpeed));
+  }, [
+    animationSpeed,
+    createPathfindingRunner,
+    resetPathfindingState,
+    runPathfindingStep,
+    setPlaybackRunning,
+    stopPathfindingAnimation,
+  ]);
 
   const applySelectionAtPoint = useCallback(
     async (center: [number, number], radiusKm: number) => {
@@ -216,59 +532,54 @@ export function MapContainer({
       clickAbortControllerRef.current = abortController;
 
       try {
-        const nearestNode = await getNearestNode(
-          center[1],
-          center[0],
-          radiusKm,
-          abortController.signal
-        );
-
-        if (abortController.signal.aborted) {
-          return;
-        }
-
-        if (!nearestNode) {
-          startMarkerRef.current?.remove();
-          startMarkerRef.current = null;
-          selectionCircleRef.current = null;
-          clearSelectionRadius(map);
-          roadGraphRef.current = null;
-          clearRoadGraph(map);
-          setRoadGraphLayerVisibility(map, false);
-          return;
-        }
-
-        setStartMarker(map, startMarkerRef, center);
-
         const circle = createGeoJSONCircle(center, radiusKm);
         selectionCircleRef.current = circle;
         setSelectionRadius(map, circle);
 
-        const graph = await getMapGraph(
-          getBoundingBoxFromPolygon(circle),
-          abortController.signal
-        );
+        const graph = await getMapGraph(getBoundingBoxFromPolygon(circle), abortController.signal);
 
         if (abortController.signal.aborted) {
           return;
         }
 
         const filteredGraph = filterRoadGraphToRadius(graph, center, radiusKm);
-        roadGraphRef.current = filteredGraph;
-
-        // Snap the marker to the nearest point on the road
-        const snappedPoint = getNearestPointOnRoad(center[1], center[0], filteredGraph);
-        if (snappedPoint) {
-          setStartMarker(map, startMarkerRef, snappedPoint);
-        } else {
-          setStartMarker(map, startMarkerRef, center);
+        if (Object.keys(filteredGraph.nodes).length === 0) {
+          roadGraphRef.current = null;
+          startNodeIdRef.current = null;
+          endNodeIdRef.current = null;
+          setPlaybackReady(false);
+          startMarkerRef.current?.remove();
+          startMarkerRef.current = null;
+          endMarkerRef.current?.remove();
+          endMarkerRef.current = null;
+          clearRoadGraph(map);
+          clearPathfindingVisualization(map);
+          setRoadGraphLayerVisibility(map, false);
+          return;
         }
 
+        roadGraphRef.current = filteredGraph;
+
+        const snappedPoint =
+          getNearestPointOnRoad(center[1], center[0], filteredGraph) ?? center;
+        const startNode = findNearestRoadNode(filteredGraph, snappedPoint[0], snappedPoint[1]);
+        if (!startNode) {
+          return;
+        }
+
+        startNodeIdRef.current = startNode.id;
+        endNodeIdRef.current = null;
+        setPlaybackReady(false);
+        endMarkerRef.current?.remove();
+        endMarkerRef.current = null;
+
+        setStartMarker(map, startMarkerRef, snappedPoint);
         setRoadGraphData(map, filteredGraph);
         setRoadGraphLayerVisibility(map, true);
+        resetPathfindingState();
       } catch (error) {
         if (!abortController.signal.aborted) {
-          console.error("Failed to resolve the nearest road node", error);
+          console.error("Failed to build road graph around start point", error);
         }
       } finally {
         if (clickAbortControllerRef.current === abortController) {
@@ -276,72 +587,73 @@ export function MapContainer({
         }
       }
     },
-    [
-      clearRoadGraph,
-      clearSelectionRadius,
-      createGeoJSONCircle,
-      filterRoadGraphToRadius,
-      getBoundingBoxFromPolygon,
-      getMapGraph,
-      getNearestNode,
-      setRoadGraphData,
-      setRoadGraphLayerVisibility,
-      setSelectionRadius,
-      setStartMarker,
-    ]
+    [resetPathfindingState, setPlaybackReady]
   );
 
   const applyEndPoint = useCallback(
-    async (center: [number, number], radiusKm: number) => {
+    async (center: [number, number]) => {
       const map = mapRef.current;
-      if (!map) {
+      const graph = roadGraphRef.current;
+      if (!map || !graph || !startNodeIdRef.current) {
         return;
       }
 
-      endAbortControllerRef.current?.abort();
-      const abortController = new AbortController();
-      endAbortControllerRef.current = abortController;
+      const snappedPoint = getNearestPointOnRoad(center[1], center[0], graph) ?? center;
+      const endNode = findNearestRoadNode(graph, snappedPoint[0], snappedPoint[1]);
+      if (!endNode) {
+        return;
+      }
 
-      try {
-        const nearestNode = await getNearestNode(
-          center[1],
-          center[0],
-          radiusKm,
-          abortController.signal
-        );
+      endNodeIdRef.current = endNode.id;
+      setPlaybackReady(true);
+      setEndMarker(map, endMarkerRef, snappedPoint);
+      createPathfindingRunner();
+      runPathfindingAnimation();
+    },
+    [createPathfindingRunner, runPathfindingAnimation, setPlaybackReady]
+  );
 
-        if (abortController.signal.aborted) {
+  useEffect(() => {
+    if (!playbackCommand || playbackCommand.id === lastPlaybackCommandIdRef.current) {
+      return;
+    }
+
+    lastPlaybackCommandIdRef.current = playbackCommand.id;
+
+    if (playbackCommand.action === "toggle") {
+      if (playbackRunningRef.current) {
+        stopPathfindingAnimation();
+      } else {
+        runPathfindingAnimation();
+      }
+      return;
+    }
+
+    if (playbackCommand.action === "step") {
+      stopPathfindingAnimation();
+      if (!runnerRef.current) {
+        const canCreate = createPathfindingRunner();
+        if (!canCreate) {
           return;
-        }
-
-        if (!nearestNode) {
-          endMarkerRef.current?.remove();
-          endMarkerRef.current = null;
-          return;
-        }
-
-        // Snap the end marker to the nearest point on the road
-        let markerPosition = center;
-        if (roadGraphRef.current) {
-          const snappedPoint = getNearestPointOnRoad(center[1], center[0], roadGraphRef.current);
-          if (snappedPoint) {
-            markerPosition = snappedPoint;
-          }
-        }
-
-        setEndMarker(map, endMarkerRef, markerPosition);
-      } catch (error) {
-        if (!abortController.signal.aborted) {
-          console.error("Failed to resolve the nearest end node", error);
-        }
-      } finally {
-        if (endAbortControllerRef.current === abortController) {
-          endAbortControllerRef.current = null;
         }
       }
-    },
-    [getNearestNode, getNearestPointOnRoad, setEndMarker]
-  );
+
+      runPathfindingStep();
+      return;
+    }
+
+    stopPathfindingAnimation();
+    if (!createPathfindingRunner()) {
+      resetPathfindingState();
+    }
+  }, [
+    createPathfindingRunner,
+    playbackCommand,
+    resetPathfindingState,
+    runPathfindingAnimation,
+    runPathfindingStep,
+    stopPathfindingAnimation,
+  ]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
@@ -357,22 +669,22 @@ export function MapContainer({
       maxZoom: 18,
     });
 
-    map.addControl(
-      new maplibregl.NavigationControl({ visualizePitch: false }),
-      "top-right"
-    );
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-right");
 
     mapRef.current = map;
     setMapInstance(map);
 
     const syncOverlayState = () => {
       ensureRoadGraphLayers(map);
+      ensurePathfindingLayers(map);
 
       if (roadGraphRef.current) {
         setRoadGraphData(map, roadGraphRef.current);
         setRoadGraphLayerVisibility(map, true);
+        setPathfindingVisualization(map, roadGraphRef.current, pathfindingStateRef.current);
       } else {
         clearRoadGraph(map);
+        clearPathfindingVisualization(map);
         setRoadGraphLayerVisibility(map, false);
       }
 
@@ -397,7 +709,7 @@ export function MapContainer({
 
       const clickPoint: [number, number] = [event.lngLat.lng, event.lngLat.lat];
       lastEndPointRef.current = clickPoint;
-      await applyEndPoint(clickPoint, radiusKmRef.current);
+      await applyEndPoint(clickPoint);
     };
 
     const handleLoad = () => {
@@ -416,8 +728,9 @@ export function MapContainer({
     map.on("styledata", handleStyleData);
 
     return () => {
+      stopPathfindingAnimation();
+      setPlaybackReady(false);
       clickAbortControllerRef.current?.abort();
-      endAbortControllerRef.current?.abort();
       map.off("click", handleMapClick);
       map.off("contextmenu", handleMapRightClick);
       map.off("load", handleLoad);
@@ -429,7 +742,7 @@ export function MapContainer({
       map.remove();
       mapRef.current = null;
     };
-  }, []);
+  }, [applyEndPoint, applySelectionAtPoint, setPlaybackReady, stopPathfindingAnimation]);
 
   useEffect(() => {
     radiusKmRef.current = effectiveRadiusKm;
@@ -437,17 +750,29 @@ export function MapContainer({
     if (lastClickPointRef.current) {
       applySelectionAtPoint(lastClickPointRef.current, effectiveRadiusKm);
     }
-
-    if (lastEndPointRef.current) {
-      applyEndPoint(lastEndPointRef.current, effectiveRadiusKm);
-    }
-  }, [applyEndPoint, applySelectionAtPoint, effectiveRadiusKm]);
+  }, [applySelectionAtPoint, effectiveRadiusKm]);
 
   useEffect(() => {
     if (mapRef.current) {
       mapRef.current.setStyle(getMapStyle(mapStyle));
     }
   }, [mapStyle]);
+
+  useEffect(() => {
+    if (startNodeIdRef.current && endNodeIdRef.current) {
+      const wasRunning = playbackRunningRef.current;
+      createPathfindingRunner();
+      if (wasRunning) {
+        runPathfindingAnimation();
+      }
+    }
+  }, [algorithm, createPathfindingRunner, runPathfindingAnimation]);
+
+  useEffect(() => {
+    if (playbackRunningRef.current) {
+      runPathfindingAnimation();
+    }
+  }, [animationSpeed, runPathfindingAnimation]);
 
   return <div ref={mapContainerRef} className="h-full w-full" />;
 }

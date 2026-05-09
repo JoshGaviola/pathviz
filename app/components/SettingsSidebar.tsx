@@ -1,10 +1,15 @@
 import { type MapStyleType } from "@/app/lib/mapStyles";
+import { type PathfindingAlgorithmType } from "@/app/lib/pathfinding";
 
 interface SettingsSidebarProps {
   isOpen: boolean;
   onClose: () => void;
   mapStyle?: MapStyleType;
   onMapStyleChange?: (style: MapStyleType) => void;
+  algorithm?: PathfindingAlgorithmType;
+  onAlgorithmChange?: (algorithm: PathfindingAlgorithmType) => void;
+  animationSpeed?: number;
+  onAnimationSpeedChange?: (speed: number) => void;
   radiusKm?: number;
   onRadiusChange?: (radiusKm: number) => void;
 }
@@ -14,6 +19,10 @@ export function SettingsSidebar({
   onClose,
   mapStyle = "dark",
   onMapStyleChange,
+  algorithm = "astar",
+  onAlgorithmChange,
+  animationSpeed = 1,
+  onAnimationSpeedChange,
   radiusKm = 2,
   onRadiusChange,
 }: SettingsSidebarProps) {
@@ -75,9 +84,17 @@ export function SettingsSidebar({
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
                 Algorithm
               </label>
-              <select className="mt-2 w-full rounded bg-slate-800 px-3 py-2 text-sm text-white ring-1 ring-slate-700 transition hover:ring-slate-600">
-                <option>Dijkstra</option>
-                <option>A*</option>
+              <select
+                className="mt-2 w-full rounded bg-slate-800 px-3 py-2 text-sm text-white ring-1 ring-slate-700 transition hover:ring-slate-600"
+                value={algorithm}
+                onChange={(event) =>
+                  onAlgorithmChange?.(event.target.value as PathfindingAlgorithmType)
+                }
+              >
+                <option value="astar">A*</option>
+                <option value="dijkstra">Dijkstra</option>
+                <option value="greedy">Greedy Best-First</option>
+                <option value="bidirectional">Bidirectional Search</option>
               </select>
             </div>
 
@@ -89,13 +106,15 @@ export function SettingsSidebar({
               <input
                 type="range"
                 min="0.1"
-                max="2"
+                max="3"
                 step="0.1"
-                defaultValue="1"
+                value={animationSpeed}
+                onChange={(event) => onAnimationSpeedChange?.(Number(event.target.value))}
                 className="mt-2 w-full"
               />
               <div className="mt-2 flex justify-between text-xs text-slate-400">
                 <span>Slow</span>
+                <span>{animationSpeed.toFixed(1)}x</span>
                 <span>Fast</span>
               </div>
             </div>
