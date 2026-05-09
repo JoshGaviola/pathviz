@@ -321,6 +321,7 @@ export function MapContainer({
   const playbackReadyRef = useRef(false);
   const lastPlaybackCommandIdRef = useRef<number>(0);
   const previousTimeRef = useRef<number | null>(null);
+  const animationSpeedRef = useRef<number>(animationSpeed);
   const pathfindingStateRef = useRef<PathfindingVisualState>({
     exploredEdgeKeys: [],
     pathEdgeKeys: [],
@@ -381,6 +382,12 @@ export function MapContainer({
       exploredEdgeKeys: [],
       pathEdgeKeys: [],
     });
+    try {
+      localStorage.removeItem("pv_start");
+      localStorage.removeItem("pv_end");
+    } catch {
+      /* ignore */
+    }
   }, [applyPathfindingState, stopPathfindingAnimation]);
 
   const createPathfindingRunner = useCallback((): boolean => {
@@ -433,7 +440,7 @@ export function MapContainer({
     previousTimeRef.current = null;
 
     const animate = (newTime: number) => {
-      const speed = Math.max(1, Math.round(animationSpeed));
+      const speed = Math.max(1, Math.round(animationSpeedRef.current ?? 1));
       for (let i = 0; i < speed; i++) {
         runPathfindingStep();
       }
@@ -444,7 +451,6 @@ export function MapContainer({
 
     pathfindingRafRef.current = requestAnimationFrame(animate);
   }, [
-    animationSpeed,
     createPathfindingRunner,
     resetPathfindingState,
     runPathfindingStep,
@@ -509,6 +515,15 @@ export function MapContainer({
         setRoadGraphData(map, filteredGraph);
         setRoadGraphLayerVisibility(map, true);
         resetPathfindingState();
+        try {
+          localStorage.setItem(
+            "pv_start",
+            JSON.stringify({ center, radiusKm })
+          );
+          localStorage.removeItem("pv_end");
+        } catch {
+          /* ignore */
+        }
       } catch (error) {
         if (!abortController.signal.aborted) {
           console.error("Failed to build road graph around start point", error);
@@ -541,6 +556,14 @@ export function MapContainer({
       setEndMarker(map, endMarkerRef, snappedPoint);
       createPathfindingRunner();
       runPathfindingAnimation();
+      try {
+        localStorage.setItem(
+          "pv_end",
+          JSON.stringify({ center })
+        );
+      } catch {
+        /* ignore */
+      }
     },
     [createPathfindingRunner, runPathfindingAnimation, setPlaybackReady]
   );
@@ -692,8 +715,27 @@ export function MapContainer({
 
   useEffect(() => {
     if (startNodeIdRef.current && endNodeIdRef.current) {
+      const map = mapRef.current;
+      let prevCenter: [number, number] | null = null;
+      let prevZoom: number | null = null;
+      if (map) {
+        const c = map.getCenter();
+        prevCenter = [c.lng, c.lat];
+        prevZoom = map.getZoom();
+      }
+
       const wasRunning = playbackRunningRef.current;
       createPathfindingRunner();
+
+      // restore view to avoid jumping when algorithm changes
+      if (map && prevCenter && typeof prevZoom === "number") {
+        try {
+          map.jumpTo({ center: prevCenter, zoom: prevZoom });
+        } catch {
+          /* ignore */
+        }
+      }
+
       if (wasRunning) {
         runPathfindingAnimation();
       }
@@ -701,10 +743,34 @@ export function MapContainer({
   }, [algorithm, createPathfindingRunner, runPathfindingAnimation]);
 
   useEffect(() => {
-    if (playbackRunningRef.current) {
-      runPathfindingAnimation();
-    }
-  }, [animationSpeed, runPathfindingAnimation]);
+    // Keep the current RAF running when speed changes; update ref instead
+    animationSpeedRef.current = animationSpeed;
+  }, [animationSpeed]);
+
+  useEffect(() => {
+    // Restore previous selection (survives hot reloads/dev edits)
+    (async () => {
+      try {
+        const s = localStorage.getItem("pv_start");
+        if (!s) return;
+        const parsed = JSON.parse(s);
+        if (parsed?.center && parsed?.radiusKm) {
+          await applySelectionAtPoint(parsed.center, parsed.radiusKm);
+        }
+
+        const e = localStorage.getItem("pv_end");
+        if (e) {
+          const parsedE = JSON.parse(e);
+          if (parsedE?.center) {
+            await applyEndPoint(parsedE.center);
+          }
+        }
+      } catch (err) {
+        // best-effort restore, ignore failures
+        console.warn("PathViz: failed to restore selection", err);
+      }
+    })();
+  }, [applySelectionAtPoint, applyEndPoint]);
 
   return <div ref={mapContainerRef} className="h-full w-full" />;
 }
