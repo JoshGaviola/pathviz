@@ -12,6 +12,8 @@ interface SettingsSidebarProps {
   onAnimationSpeedChange?: (speed: number) => void;
   radiusKm?: number;
   onRadiusChange?: (radiusKm: number) => void;
+  showRoadOverlay?: boolean;
+  onShowRoadOverlayChange?: (show: boolean) => void;
 }
 
 export function SettingsSidebar({
@@ -25,6 +27,8 @@ export function SettingsSidebar({
   onAnimationSpeedChange,
   radiusKm = 2,
   onRadiusChange,
+  showRoadOverlay = false,
+  onShowRoadOverlayChange,
 }: SettingsSidebarProps) {
   return (
     <>
@@ -138,6 +142,22 @@ export function SettingsSidebar({
                 <span>{radiusKm.toFixed(0)} km</span>
                 <span>20 km</span>
               </div>
+            </div>
+
+            {/* Road overlay toggle */}
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Road Overlay
+              </label>
+              <label className="mt-3 flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={showRoadOverlay}
+                  onChange={(event) => onShowRoadOverlayChange?.(event.target.checked)}
+                  className="h-4 w-4 rounded bg-slate-800 accent-emerald-500"
+                />
+                <span className="text-sm text-slate-300">{showRoadOverlay ? "Visible" : "Hidden"}</span>
+              </label>
             </div>
 
             {/* Legend section */}

@@ -21,6 +21,7 @@ interface MapContainerProps {
   selectionRadiusKm?: number;
   algorithm?: PathfindingAlgorithmType;
   animationSpeed?: number;
+  showRoadOverlay?: boolean;
   playbackCommand?: { id: number; action: "toggle" | "step" | "reset" };
   onPlaybackRunningChange?: (running: boolean) => void;
   onPlaybackReadyChange?: (ready: boolean) => void;
@@ -299,6 +300,7 @@ export function MapContainer({
   selectionRadiusKm,
   algorithm = "astar",
   animationSpeed = 1,
+  showRoadOverlay = false,
   playbackCommand,
   onPlaybackRunningChange,
   onPlaybackReadyChange,
@@ -513,7 +515,7 @@ export function MapContainer({
 
         setStartMarker(map, startMarkerRef, snappedPoint);
         setRoadGraphData(map, filteredGraph);
-        setRoadGraphLayerVisibility(map, true);
+        setRoadGraphLayerVisibility(map, showRoadOverlay);
         resetPathfindingState();
         try {
           localStorage.setItem(
@@ -697,7 +699,7 @@ export function MapContainer({
       map.remove();
       mapRef.current = null;
     };
-  }, [applyEndPoint, applySelectionAtPoint, setPlaybackReady, stopPathfindingAnimation]);
+  }, [applyEndPoint, applySelectionAtPoint, setPlaybackReady, stopPathfindingAnimation, showRoadOverlay]);
 
   useEffect(() => {
     radiusKmRef.current = effectiveRadiusKm;
@@ -712,6 +714,25 @@ export function MapContainer({
       mapRef.current.setStyle(getMapStyle(mapStyle));
     }
   }, [mapStyle]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    // Only show road overlay if it's enabled AND we have a graph loaded
+    if (showRoadOverlay && roadGraphRef.current) {
+      setRoadGraphLayerVisibility(map, true);
+    } else {
+      setRoadGraphLayerVisibility(map, false);
+    }
+  }, [showRoadOverlay]);
+
+  useEffect(() => {
+    // Hide road overlay on initial mount (default behavior)
+    const map = mapRef.current;
+    if (map) {
+      setRoadGraphLayerVisibility(map, false);
+    }
+  }, []);
 
   useEffect(() => {
     if (startNodeIdRef.current && endNodeIdRef.current) {

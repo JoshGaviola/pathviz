@@ -21,6 +21,7 @@ export default function Home() {
   const [selectionRadiusKm, setSelectionRadiusKm] = useState(2);
   const [algorithm, setAlgorithm] = useState<PathfindingAlgorithmType>("astar");
   const [animationSpeed, setAnimationSpeed] = useState(1);
+  const [showRoadOverlay, setShowRoadOverlay] = useState(false);
   const [isPlaybackRunning, setIsPlaybackRunning] = useState(false);
   const [isPlaybackReady, setIsPlaybackReady] = useState(false);
   const [playbackCommand, setPlaybackCommand] = useState<PlaybackCommand | undefined>();
@@ -40,6 +41,7 @@ export default function Home() {
         selectionRadiusKm={selectionRadiusKm}
         algorithm={algorithm}
         animationSpeed={animationSpeed}
+        showRoadOverlay={showRoadOverlay}
         playbackCommand={playbackCommand}
         onPlaybackRunningChange={setIsPlaybackRunning}
         onPlaybackReadyChange={setIsPlaybackReady}
@@ -68,6 +70,8 @@ export default function Home() {
         onAnimationSpeedChange={setAnimationSpeed}
         radiusKm={selectionRadiusKm}
         onRadiusChange={setSelectionRadiusKm}
+        showRoadOverlay={showRoadOverlay}
+        onShowRoadOverlayChange={setShowRoadOverlay}
       />
     </div>
   );
