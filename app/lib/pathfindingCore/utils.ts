@@ -1,5 +1,6 @@
 import type { RoadGraph } from "../roadGraph";
 import type { SearchSnapshot, SearchState } from "./types";
+import { getDistanceMeters } from "../roadGraphCore/geometry";
 
 export function getEdgeKey(a: string, b: string): string {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
@@ -13,7 +14,8 @@ export function getHeuristic(graph: RoadGraph, fromId: string, toId: string): nu
     return Number.POSITIVE_INFINITY;
   }
 
-  return Math.hypot(from.lat - to.lat, from.lng - to.lng);
+  // Use haversine distance in meters (same units as edge distances)
+  return getDistanceMeters([from.lng, from.lat], [to.lng, to.lat]);
 }
 
 export function getNeighborDistance(
