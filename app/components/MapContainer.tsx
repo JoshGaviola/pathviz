@@ -25,6 +25,7 @@ interface MapContainerProps {
   playbackCommand?: { id: number; action: "toggle" | "step" | "reset" };
   onPlaybackRunningChange?: (running: boolean) => void;
   onPlaybackReadyChange?: (ready: boolean) => void;
+  onMapCenterChange?: (center: { lng: number; lat: number; zoom: number }) => void;
 }
 
 const ROAD_EDGE_SOURCE_ID = "road-edge-source";
@@ -304,6 +305,7 @@ export function MapContainer({
   playbackCommand,
   onPlaybackRunningChange,
   onPlaybackReadyChange,
+  onMapCenterChange,
 }: MapContainerProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -725,6 +727,26 @@ export function MapContainer({
       setRoadGraphLayerVisibility(map, false);
     }
   }, [showRoadOverlay]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const handleMapMove = () => {
+      const center = map.getCenter();
+      const zoom = map.getZoom();
+      onMapCenterChange?.({ lng: center.lng, lat: center.lat, zoom });
+    };
+
+    map.on("move", handleMapMove);
+    
+    // Call once to set initial coordinates
+    handleMapMove();
+
+    return () => {
+      map.off("move", handleMapMove);
+    };
+  }, [onMapCenterChange]);
 
   useEffect(() => {
     // Hide road overlay on initial mount (default behavior)
