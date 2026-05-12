@@ -1,24 +1,29 @@
 import type { RoadGraph } from "../roadGraph";
-import { stepBidirectional, stepSingleDirection } from "./steps";
 import type {
   PathfindingAlgorithmType,
   SearchSnapshot,
-  SearchState,
 } from "./types";
 import {
   getEdgeKey,
   getHeuristic,
   getSnapshot,
 } from "./utils";
+import {
+  AStar,
+  BidirectionalSearch,
+  Dijkstra,
+  Greedy,
+  type PathfindingAlgorithm,
+} from "./algorithms";
 
 export class PathfindingRunner {
-  private state: SearchState;
+  private algorithm: PathfindingAlgorithm;
 
   constructor(
     graph: RoadGraph,
     startNodeId: string,
     endNodeId: string,
-    algorithm: PathfindingAlgorithmType
+    algorithmType: PathfindingAlgorithmType
   ) {
     const edgeDistances = new Map<string, number>();
     for (const edge of graph.edges) {
@@ -30,44 +35,36 @@ export class PathfindingRunner {
       heuristic.set(nodeId, getHeuristic(graph, nodeId, endNodeId));
     }
 
-    this.state = {
-      graph,
-      startId: startNodeId,
-      endId: endNodeId,
-      algorithm,
-      edgeDistances,
-      distFromStart: new Map([[startNodeId, 0]]),
-      parent: new Map([[startNodeId, null]]),
-      visited: new Set(),
-      open: new Set([startNodeId]),
-      heuristic,
-      openStart: new Set([startNodeId]),
-      openEnd: new Set([endNodeId]),
-      closedStart: new Set(),
-      closedEnd: new Set(),
-      parentStart: new Map([[startNodeId, null]]),
-      parentEnd: new Map([[endNodeId, null]]),
-      finished: false,
-      foundPath: false,
-      meetingNodeId: null,
-    };
+    // Instantiate the appropriate algorithm
+    switch (algorithmType) {
+      case "astar":
+        this.algorithm = new AStar(graph, startNodeId, endNodeId, edgeDistances, heuristic);
+        break;
+      case "dijkstra":
+        this.algorithm = new Dijkstra(graph, startNodeId, endNodeId, edgeDistances, heuristic);
+        break;
+      case "greedy":
+        this.algorithm = new Greedy(graph, startNodeId, endNodeId, edgeDistances, heuristic);
+        break;
+      case "bidirectional":
+        this.algorithm = new BidirectionalSearch(graph, startNodeId, endNodeId, edgeDistances, heuristic);
+        break;
+      default:
+        throw new Error(`Unknown algorithm: ${algorithmType}`);
+    }
   }
 
   getSnapshot(): SearchSnapshot {
-    return getSnapshot(this.state);
+    return getSnapshot(this.algorithm.getState());
   }
 
   nextStep(): SearchSnapshot {
-    if (this.state.finished) {
-      return getSnapshot(this.state);
+    const state = this.algorithm.getState();
+    if (state.finished) {
+      return getSnapshot(state);
     }
 
-    if (this.state.algorithm === "bidirectional") {
-      stepBidirectional(this.state);
-    } else {
-      stepSingleDirection(this.state);
-    }
-
-    return getSnapshot(this.state);
+    this.algorithm.nextStep();
+    return getSnapshot(this.algorithm.getState());
   }
 }
