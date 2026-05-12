@@ -14,7 +14,6 @@ interface SettingsSidebarProps {
   onRadiusChange?: (radiusKm: number) => void;
   showRoadOverlay?: boolean;
   onShowRoadOverlayChange?: (show: boolean) => void;
-  mapCenter?: { lng: number; lat: number; zoom: number };
 }
 
 export function SettingsSidebar({
@@ -30,7 +29,6 @@ export function SettingsSidebar({
   onRadiusChange,
   showRoadOverlay = false,
   onShowRoadOverlayChange,
-  mapCenter = { lng: 0, lat: 0, zoom: 0 },
 }: SettingsSidebarProps) {
   return (
     <>
@@ -160,18 +158,6 @@ export function SettingsSidebar({
                 />
                 <span className="text-sm text-slate-300">{showRoadOverlay ? "Visible" : "Hidden"}</span>
               </label>
-            </div>
-
-            {/* Map coordinates section */}
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Map Coordinates
-              </label>
-              <div className="mt-3 rounded bg-slate-800 p-3 font-mono text-xs text-slate-300">
-                <div className="truncate">Lng: {mapCenter.lng.toFixed(6)}</div>
-                <div className="truncate">Lat: {mapCenter.lat.toFixed(6)}</div>
-                <div className="truncate">Zoom: {mapCenter.zoom.toFixed(2)}</div>
-              </div>
             </div>
 
             {/* Legend section */}

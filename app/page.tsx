@@ -25,7 +25,6 @@ export default function Home() {
   const [isPlaybackRunning, setIsPlaybackRunning] = useState(false);
   const [isPlaybackReady, setIsPlaybackReady] = useState(false);
   const [playbackCommand, setPlaybackCommand] = useState<PlaybackCommand | undefined>();
-  const [mapCenter, setMapCenter] = useState({ lng: 0, lat: 0, zoom: 0 });
 
   const sendPlaybackCommand = (action: PlaybackAction) => {
     setPlaybackCommand((previous) => ({
@@ -46,7 +45,6 @@ export default function Home() {
         playbackCommand={playbackCommand}
         onPlaybackRunningChange={setIsPlaybackRunning}
         onPlaybackReadyChange={setIsPlaybackReady}
-        onMapCenterChange={setMapCenter}
       />
 
       <PlaybackControls
@@ -74,7 +72,6 @@ export default function Home() {
         onRadiusChange={setSelectionRadiusKm}
         showRoadOverlay={showRoadOverlay}
         onShowRoadOverlayChange={setShowRoadOverlay}
-        mapCenter={mapCenter}
       />
     </div>
   );
