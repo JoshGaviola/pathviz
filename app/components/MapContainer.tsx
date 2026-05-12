@@ -326,6 +326,13 @@ export function MapContainer({
   const lastPlaybackCommandIdRef = useRef<number>(0);
   const previousTimeRef = useRef<number | null>(null);
   const animationSpeedRef = useRef<number>(animationSpeed);
+  const applySelectionAtPointRef = useRef<
+    ((center: [number, number], radiusKm: number) => Promise<void>) | null
+  >(null);
+  const applyEndPointRef = useRef<((center: [number, number]) => Promise<void>) | null>(null);
+  const stopPathfindingAnimationRef = useRef<(() => void) | null>(null);
+  const setPlaybackReadyRef = useRef<((ready: boolean) => void) | null>(null);
+  const showRoadOverlayRef = useRef(showRoadOverlay);
   const pathfindingStateRef = useRef<PathfindingVisualState>({
     exploredEdgeKeys: [],
     pathEdgeKeys: [],
@@ -572,6 +579,12 @@ export function MapContainer({
     [createPathfindingRunner, runPathfindingAnimation, setPlaybackReady]
   );
 
+  applySelectionAtPointRef.current = applySelectionAtPoint;
+  applyEndPointRef.current = applyEndPoint;
+  stopPathfindingAnimationRef.current = stopPathfindingAnimation;
+  setPlaybackReadyRef.current = setPlaybackReady;
+  showRoadOverlayRef.current = showRoadOverlay;
+
   useEffect(() => {
     if (!playbackCommand || playbackCommand.id === lastPlaybackCommandIdRef.current) {
       return;
@@ -639,7 +652,7 @@ export function MapContainer({
 
       if (roadGraphRef.current) {
         setRoadGraphData(map, roadGraphRef.current);
-        setRoadGraphLayerVisibility(map, showRoadOverlay);
+        setRoadGraphLayerVisibility(map, showRoadOverlayRef.current);
         setPathfindingVisualization(map, roadGraphRef.current, pathfindingStateRef.current);
       } else {
         clearRoadGraph(map);
@@ -657,7 +670,7 @@ export function MapContainer({
     const handleMapClick = async (event: maplibregl.MapMouseEvent) => {
       const clickPoint: [number, number] = [event.lngLat.lng, event.lngLat.lat];
       lastClickPointRef.current = clickPoint;
-      await applySelectionAtPoint(clickPoint, radiusKmRef.current);
+      await applySelectionAtPointRef.current?.(clickPoint, radiusKmRef.current);
     };
 
     const handleMapRightClick = async (event: maplibregl.MapMouseEvent) => {
@@ -668,7 +681,7 @@ export function MapContainer({
 
       const clickPoint: [number, number] = [event.lngLat.lng, event.lngLat.lat];
       lastEndPointRef.current = clickPoint;
-      await applyEndPoint(clickPoint);
+      await applyEndPointRef.current?.(clickPoint);
     };
 
     const handleLoad = () => {
@@ -687,8 +700,8 @@ export function MapContainer({
     map.on("styledata", handleStyleData);
 
     return () => {
-      stopPathfindingAnimation();
-      setPlaybackReady(false);
+      stopPathfindingAnimationRef.current?.();
+      setPlaybackReadyRef.current?.(false);
       clickAbortControllerRef.current?.abort();
       map.off("click", handleMapClick);
       map.off("contextmenu", handleMapRightClick);
@@ -701,7 +714,7 @@ export function MapContainer({
       map.remove();
       mapRef.current = null;
     };
-  }, [applyEndPoint, applySelectionAtPoint, setPlaybackReady, stopPathfindingAnimation, showRoadOverlay]);
+  }, []);
 
   useEffect(() => {
     radiusKmRef.current = effectiveRadiusKm;
