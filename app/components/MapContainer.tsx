@@ -536,7 +536,7 @@ export function MapContainer({
         }
       }
     },
-    [resetPathfindingState, setPlaybackReady]
+    [resetPathfindingState, setPlaybackReady, showRoadOverlay]
   );
 
   const applyEndPoint = useCallback(
@@ -637,7 +637,7 @@ export function MapContainer({
 
       if (roadGraphRef.current) {
         setRoadGraphData(map, roadGraphRef.current);
-        setRoadGraphLayerVisibility(map, true);
+        setRoadGraphLayerVisibility(map, showRoadOverlay);
         setPathfindingVisualization(map, roadGraphRef.current, pathfindingStateRef.current);
       } else {
         clearRoadGraph(map);
