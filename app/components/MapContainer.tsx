@@ -227,6 +227,16 @@ function setEndMarker(
   markerRef.current.setLngLat(lngLat).addTo(map);
 }
 
+function removeMarker(markerRef: MutableRefObject<maplibregl.Marker | null>): void {
+  const marker = markerRef.current;
+  if (!marker) {
+    return;
+  }
+
+  marker.remove();
+  markerRef.current = null;
+}
+
 function setRoadGraphData(map: maplibregl.Map, graph: RoadGraph): void {
   getGeoJsonSource(map, ROAD_EDGE_SOURCE_ID)?.setData(roadGraphToEdgeFeatureCollection(graph));
 }
@@ -507,6 +517,9 @@ export function MapContainer({
         const circle = createGeoJSONCircle(center, radiusKm);
         selectionCircleRef.current = circle;
         setSelectionRadius(map, circle);
+        setStartMarker(map, startMarkerRef, center);
+        setPlaybackReady(false);
+        removeMarker(endMarkerRef);
 
         const graph = await getMapGraph(getBoundingBoxFromPolygon(circle), abortController.signal);
 
@@ -520,10 +533,7 @@ export function MapContainer({
           startNodeIdRef.current = null;
           endNodeIdRef.current = null;
           setPlaybackReady(false);
-          startMarkerRef.current?.remove();
-          startMarkerRef.current = null;
-          endMarkerRef.current?.remove();
-          endMarkerRef.current = null;
+          removeMarker(endMarkerRef);
           clearRoadGraph(map);
           clearPathfindingVisualization(map);
           setRoadGraphLayerVisibility(map, false);
@@ -543,8 +553,7 @@ export function MapContainer({
         startNodeIdRef.current = startNode.id;
         endNodeIdRef.current = null;
         setPlaybackReady(false);
-        endMarkerRef.current?.remove();
-        endMarkerRef.current = null;
+        removeMarker(endMarkerRef);
 
         setStartMarker(map, startMarkerRef, snappedPoint);
         setRoadGraphData(map, filteredGraph);
@@ -751,8 +760,6 @@ export function MapContainer({
   }, []);
 
   useEffect(() => {
-    radiusKmRef.current = effectiveRadiusKm;
-
     if (lastClickPointRef.current) {
       applySelectionAtPoint(lastClickPointRef.current, effectiveRadiusKm);
     }
