@@ -369,6 +369,7 @@ export function MapContainer({
     }
     previousTimeRef.current = null;
 
+    // stop timing
     setPlaybackRunning(false);
   }, [setPlaybackRunning]);
 
@@ -433,6 +434,8 @@ export function MapContainer({
       pathEdgeKeys: snapshot.pathEdgeKeys,
     });
 
+    
+
     if (snapshot.finished) {
       stopPathfindingAnimation();
     }
@@ -447,6 +450,7 @@ export function MapContainer({
     stopPathfindingAnimation();
     setPlaybackRunning(true);
     previousTimeRef.current = null;
+    
 
     const animate = (newTime: number) => {
       const speed = Math.max(1, Math.round(animationSpeedRef.current ?? 1));
@@ -506,6 +510,7 @@ export function MapContainer({
         }
 
         roadGraphRef.current = filteredGraph;
+        
 
         const snappedPoint =
           getNearestPointOnRoad(center[1], center[0], filteredGraph) ?? center;

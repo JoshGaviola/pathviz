@@ -185,26 +185,7 @@ export function SettingsSidebar({
               </div>
             </div>
 
-            {/* Stats section */}
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Statistics
-              </label>
-              <div className="mt-3 space-y-2 rounded bg-slate-800 p-3">
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">Visited:</span>
-                  <span className="text-white">0</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">Path length:</span>
-                  <span className="text-white">0 km</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">Time:</span>
-                  <span className="text-white">0 ms</span>
-                </div>
-              </div>
-            </div>
+            
           </div>
         </div>
       </div>
