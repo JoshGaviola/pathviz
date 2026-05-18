@@ -184,6 +184,10 @@ function clearPathfindingVisualization(map: maplibregl.Map): void {
 }
 
 function setSelectionRadius(map: maplibregl.Map, circle: [number, number][]): void {
+  // debug: log when we attempt to set selection radius data
+  // eslint-disable-next-line no-console
+  console.debug("setSelectionRadius: attempting to set data on source", SELECTION_RADIUS_SOURCE_ID, { hasSource: !!map.getSource(SELECTION_RADIUS_SOURCE_ID) });
+
   getGeoJsonSource(map, SELECTION_RADIUS_SOURCE_ID)?.setData({
     type: "FeatureCollection",
     features: [
@@ -667,8 +671,11 @@ export function MapContainer({
     setMapInstance(map);
 
     const syncOverlayState = () => {
-      ensureRoadGraphLayers(map);
-      ensurePathfindingLayers(map);
+        // debug: ensure overlays are re-added after style changes
+        // eslint-disable-next-line no-console
+        console.debug("syncOverlayState: ensuring overlay layers/sources");
+        ensureRoadGraphLayers(map);
+        ensurePathfindingLayers(map);
 
       if (roadGraphRef.current) {
         setRoadGraphData(map, roadGraphRef.current);
@@ -708,6 +715,11 @@ export function MapContainer({
       syncOverlayState();
     };
 
+    const handleStyleLoad = () => {
+      // style.load is emitted when the style is fully rebuilt
+      syncOverlayState();
+    };
+
     const handleStyleData = () => {
       if (map.isStyleLoaded()) {
         syncOverlayState();
@@ -717,6 +729,7 @@ export function MapContainer({
     map.on("click", handleMapClick);
     map.on("contextmenu", handleMapRightClick);
     map.on("load", handleLoad);
+    map.on("style.load", handleStyleLoad);
     map.on("styledata", handleStyleData);
 
     return () => {
@@ -726,6 +739,7 @@ export function MapContainer({
       map.off("click", handleMapClick);
       map.off("contextmenu", handleMapRightClick);
       map.off("load", handleLoad);
+      map.off("style.load", handleStyleLoad);
       map.off("styledata", handleStyleData);
       startMarkerRef.current?.remove();
       startMarkerRef.current = null;
