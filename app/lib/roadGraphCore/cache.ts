@@ -75,21 +75,6 @@ export async function fetchRoadGraphForBounds(
     return cachedGraph;
   }
 
-  if (typeof window !== "undefined") {
-    const response = await fetch(
-      `/api/road-graph?bounds=${encodeURIComponent(JSON.stringify(bounds))}&precision=${precision}&zoom=${Math.floor(zoom)}`,
-      {
-        signal: options?.signal,
-      }
-    );
-
-    if (response.ok) {
-      const graph = (await response.json()) as RoadGraph;
-      storeCachedGraph(cacheKey, graph);
-      return graph;
-    }
-  }
-
   const response = await fetchOverpassData(bounds, options?.signal);
   const payload = (await response.json()) as OverpassResponse;
   const graph = buildRoadGraphFromOverpass(payload, precision);
