@@ -323,6 +323,7 @@ export function MapContainer({
   const playbackReadyRef = useRef(false);
   const lastPlaybackCommandIdRef = useRef<number>(0);
   const previousTimeRef = useRef<number | null>(null);
+  const stepAccumulatorRef = useRef<number>(0);
   const animationSpeedRef = useRef<number>(animationSpeed);
   const applySelectionAtPointRef = useRef<
     ((center: [number, number], radiusKm: number) => Promise<void>) | null
@@ -453,12 +454,28 @@ export function MapContainer({
     
 
     const animate = (newTime: number) => {
-      const speed = Math.max(1, Math.round(animationSpeedRef.current ?? 1));
-      for (let i = 0; i < speed; i++) {
-        runPathfindingStep();
+      if (previousTimeRef.current === null) {
+        previousTimeRef.current = newTime;
+        pathfindingRafRef.current = requestAnimationFrame(animate);
+        return;
       }
 
+      const dtMs = newTime - (previousTimeRef.current ?? newTime);
       previousTimeRef.current = newTime;
+
+      // base steps per second controls how many algorithm steps per real second at speed=1
+      const BASE_STEPS_PER_SECOND = 60;
+      const stepsToAdd = (dtMs / 1000) * BASE_STEPS_PER_SECOND * (animationSpeedRef.current ?? 1);
+      stepAccumulatorRef.current += stepsToAdd;
+
+      const stepsToRun = Math.floor(stepAccumulatorRef.current);
+      if (stepsToRun > 0) {
+        stepAccumulatorRef.current -= stepsToRun;
+        for (let i = 0; i < stepsToRun; i++) {
+          runPathfindingStep();
+        }
+      }
+
       pathfindingRafRef.current = requestAnimationFrame(animate);
     };
 
