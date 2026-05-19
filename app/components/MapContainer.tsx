@@ -319,6 +319,8 @@ export function MapContainer({
   const clickAbortControllerRef = useRef<AbortController | null>(null);
   const [isFetchingGraph, setIsFetchingGraph] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState<string | null>(null);
+  const [isFetchError, setIsFetchError] = useState(false);
+  const lastRequestedSelectionRef = useRef<{ center: [number, number]; radiusKm: number } | null>(null);
   const lastClickPointRef = useRef<[number, number] | null>(null);
   const lastEndPointRef = useRef<[number, number] | null>(null);
   const startNodeIdRef = useRef<string | null>(null);
@@ -507,6 +509,8 @@ export function MapContainer({
       clickAbortControllerRef.current?.abort();
       const abortController = new AbortController();
       clickAbortControllerRef.current = abortController;
+      lastRequestedSelectionRef.current = { center, radiusKm };
+      setIsFetchError(false);
 
       try {
         const circle = createGeoJSONCircle(center, radiusKm);
@@ -567,14 +571,23 @@ export function MapContainer({
       } catch (error) {
         if (!abortController.signal.aborted) {
           console.error("Failed to build road graph around start point", error);
+          // surface friendly error to user and allow retry
+          setLoadingMessage(
+            error instanceof Error ? `Failed to load area: ${error.message}` : `Failed to load area`
+          );
+          setIsFetchError(true);
+          // keep isFetchingGraph true so overlay remains visible with retry option
+          setIsFetchingGraph(true);
         }
       } finally {
         // clear loading state when the fetch completes or is aborted
         if (clickAbortControllerRef.current === abortController) {
           clickAbortControllerRef.current = null;
         }
-        setIsFetchingGraph(false);
-        setLoadingMessage(null);
+        if (!isFetchError) {
+          setIsFetchingGraph(false);
+          setLoadingMessage(null);
+        }
       }
     },
     [resetPathfindingState, setPlaybackReady, showRoadOverlay]
@@ -621,6 +634,20 @@ export function MapContainer({
     clickAbortControllerRef.current?.abort();
     setIsFetchingGraph(false);
     setLoadingMessage(null);
+    setIsFetchError(false);
+  }, []);
+
+  const retryGraphFetch = useCallback(async () => {
+    const last = lastRequestedSelectionRef.current;
+    if (!last) return;
+    setIsFetchError(false);
+    setLoadingMessage("Retrying...");
+    setIsFetchingGraph(true);
+    try {
+      await applySelectionAtPointRef.current?.(last.center, last.radiusKm);
+    } catch (e) {
+      // applySelectionAtPoint handles errors and will set the error state
+    }
   }, []);
 
   useEffect(() => {
@@ -869,14 +896,33 @@ export function MapContainer({
                 <div className="text-sm mt-1">{loadingMessage ?? "Building map data..."}</div>
                 <div className="text-xs opacity-80 mt-3">Tip: large radii or dense urban areas take longer; you can cancel and try a smaller radius.</div>
               </div>
-              <div className="flex-shrink-0">
-                <button
-                  type="button"
-                  onClick={cancelGraphFetch}
-                  className="bg-red-600 hover:bg-red-700 text-white rounded px-3 py-1"
-                >
-                  Cancel
-                </button>
+              <div className="flex-shrink-0 flex flex-col gap-2">
+                {isFetchError ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={retryGraphFetch}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white rounded px-3 py-1"
+                    >
+                      Retry
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelGraphFetch}
+                      className="bg-red-600 hover:bg-red-700 text-white rounded px-3 py-1"
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={cancelGraphFetch}
+                    className="bg-red-600 hover:bg-red-700 text-white rounded px-3 py-1"
+                  >
+                    Cancel
+                  </button>
+                )}
               </div>
             </div>
           </div>
