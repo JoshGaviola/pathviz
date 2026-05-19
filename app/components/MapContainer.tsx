@@ -1,7 +1,7 @@
 "use client";
 
 import maplibregl from "maplibre-gl";
-import { useCallback, useEffect, useRef, type MutableRefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { getMapStyle, type MapStyleType } from "@/app/lib/mapStyles";
 import { setMapInstance } from "../lib/mapStore";
 import {
@@ -317,6 +317,8 @@ export function MapContainer({
   const endMarkerRef = useRef<maplibregl.Marker | null>(null);
   const selectionCircleRef = useRef<[number, number][] | null>(null);
   const clickAbortControllerRef = useRef<AbortController | null>(null);
+  const [isFetchingGraph, setIsFetchingGraph] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState<string | null>(null);
   const lastClickPointRef = useRef<[number, number] | null>(null);
   const lastEndPointRef = useRef<[number, number] | null>(null);
   const startNodeIdRef = useRef<string | null>(null);
@@ -499,6 +501,9 @@ export function MapContainer({
         return;
       }
 
+      // show loading state and abort any in-flight graph fetch
+      setIsFetchingGraph(true);
+      setLoadingMessage("Loading road graph — this can take several seconds.");
       clickAbortControllerRef.current?.abort();
       const abortController = new AbortController();
       clickAbortControllerRef.current = abortController;
@@ -564,9 +569,12 @@ export function MapContainer({
           console.error("Failed to build road graph around start point", error);
         }
       } finally {
+        // clear loading state when the fetch completes or is aborted
         if (clickAbortControllerRef.current === abortController) {
           clickAbortControllerRef.current = null;
         }
+        setIsFetchingGraph(false);
+        setLoadingMessage(null);
       }
     },
     [resetPathfindingState, setPlaybackReady, showRoadOverlay]
@@ -608,6 +616,12 @@ export function MapContainer({
   stopPathfindingAnimationRef.current = stopPathfindingAnimation;
   setPlaybackReadyRef.current = setPlaybackReady;
   showRoadOverlayRef.current = showRoadOverlay;
+
+  const cancelGraphFetch = useCallback(() => {
+    clickAbortControllerRef.current?.abort();
+    setIsFetchingGraph(false);
+    setLoadingMessage(null);
+  }, []);
 
   useEffect(() => {
     if (!playbackCommand || playbackCommand.id === lastPlaybackCommandIdRef.current) {
@@ -842,5 +856,32 @@ export function MapContainer({
     })();
   }, [applySelectionAtPoint, applyEndPoint]);
 
-  return <div ref={mapContainerRef} className="h-full w-full" />;
+  return (
+    <div className="relative h-full w-full">
+      <div ref={mapContainerRef} className="h-full w-full" />
+
+      {isFetchingGraph ? (
+        <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none">
+          <div className="bg-black bg-opacity-70 text-white rounded-md p-4 max-w-lg w-full mx-4 pointer-events-auto">
+            <div className="flex items-start gap-4">
+              <div className="flex-1">
+                <div className="font-semibold">Loading road graph</div>
+                <div className="text-sm mt-1">{loadingMessage ?? "Building map data..."}</div>
+                <div className="text-xs opacity-80 mt-3">Tip: large radii or dense urban areas take longer; you can cancel and try a smaller radius.</div>
+              </div>
+              <div className="flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={cancelGraphFetch}
+                  className="bg-red-600 hover:bg-red-700 text-white rounded px-3 py-1"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
