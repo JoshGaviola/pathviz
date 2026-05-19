@@ -33,13 +33,47 @@ out skel;`;
 async function fetchOverpassResponse(query: string, signal?: AbortSignal): Promise<Response> {
   let lastError: unknown = null;
 
-  for (const endpoint of OVERPASS_API_URLS) {
+  const REQUEST_TIMEOUT_MS = 15000; // per-endpoint timeout
+  const RETRY_ON_429_DELAY_MS = 2000;
+
+  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  async function fetchWithTimeout(endpoint: string): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    const onOuterAbort = () => controller.abort();
+    if (signal) {
+      if (signal.aborted) {
+        clearTimeout(timeout);
+        controller.abort();
+      } else {
+        signal.addEventListener("abort", onOuterAbort);
+      }
+    }
+
     try {
       const response = await fetch(endpoint, {
         method: "POST",
         body: query,
-        signal,
+        signal: controller.signal,
       });
+      return response;
+    } finally {
+      clearTimeout(timeout);
+      if (signal) {
+        try {
+          signal.removeEventListener("abort", onOuterAbort);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
+
+  for (const endpoint of OVERPASS_API_URLS) {
+    try {
+      const response = await fetchWithTimeout(endpoint);
 
       if (!response.ok) {
         lastError = new OverpassError(
@@ -47,8 +81,10 @@ async function fetchOverpassResponse(query: string, signal?: AbortSignal): Promi
           `Overpass request failed with status ${response.status} from ${endpoint}`
         );
 
+        // For rate-limited responses, wait a moment and try the next endpoint
         if (response.status === 429) {
-          throw lastError;
+          await delay(RETRY_ON_429_DELAY_MS);
+          continue;
         }
 
         continue;
@@ -56,6 +92,7 @@ async function fetchOverpassResponse(query: string, signal?: AbortSignal): Promi
 
       return response;
     } catch (error) {
+      // If the outer signal aborted, propagate immediately so callers can handle cancellation.
       if (signal?.aborted) {
         throw error;
       }
