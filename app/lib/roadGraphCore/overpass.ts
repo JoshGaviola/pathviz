@@ -15,6 +15,29 @@ const OVERPASS_API_URLS = [
 ];
 
 const HIGHWAY_EXCLUDE = ["footway", "street_lamp", "steps", "pedestrian", "track", "path"];
+const OVERPASS_HEADERS: Record<string, string> = {
+  "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+  accept: "application/json",
+  "user-agent": "PathViz/1.0",
+};
+
+function formatBoundingBoxParam(
+  boundingBox: [{ latitude: number; longitude: number }, { latitude: number; longitude: number }]
+): string {
+  return [
+    boundingBox[0].latitude,
+    boundingBox[0].longitude,
+    boundingBox[1].latitude,
+    boundingBox[1].longitude,
+  ].join(",");
+}
+
+function getRoadGraphApiUrl(
+  boundingBox: [{ latitude: number; longitude: number }, { latitude: number; longitude: number }]
+): string {
+  const params = new URLSearchParams({ bbox: formatBoundingBoxParam(boundingBox) });
+  return `/api/road-graph?${params.toString()}`;
+}
 
 function createOverpassQuery(
   boundingBox: [{ latitude: number; longitude: number }, { latitude: number; longitude: number }]
@@ -55,7 +78,8 @@ async function fetchOverpassResponse(query: string, signal?: AbortSignal): Promi
     try {
       const response = await fetch(endpoint, {
         method: "POST",
-        body: query,
+        body: `data=${encodeURIComponent(query)}`,
+        headers: OVERPASS_HEADERS,
         signal: controller.signal,
       });
       return response;
@@ -112,6 +136,10 @@ export function fetchOverpassData(
   boundingBox: [{ latitude: number; longitude: number }, { latitude: number; longitude: number }],
   signal?: AbortSignal
 ): Promise<Response> {
+  if (typeof window !== "undefined") {
+    return fetch(getRoadGraphApiUrl(boundingBox), { signal });
+  }
+
   const query = createOverpassQuery(boundingBox);
   return fetchOverpassResponse(query, signal);
 }
